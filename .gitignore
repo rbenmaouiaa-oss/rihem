@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+*/node_modules/
+**/node_modules/
+.expo/
+**/.expo/
+
+# Python
+.venv/
+venv/
+**/.venv/
+**/venv/
+*.pyc
+**/__pycache__/
+__pycache__/
+
+# Environment — never commit secrets
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Build outputs
+build/
+dist/
+dist-ssr/
+.next/
+web-build/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Lock files (keep package-lock.json but ignore others if needed)
+# package-lock.json
+
+# Misc
+*.local
+*.tsbuildinfo
+.metro-health-check*

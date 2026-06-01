@@ -1,0 +1,10 @@
+AppData
+appdata
+Temp
+temp
+*.log
+*.tmp
+AndroidStudio*
+Google/AndroidStudio*
+
+

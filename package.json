@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "dayjs": "^1.11.20",
+    "react-native-qrcode-svg": "^6.3.21"
+  }
+}
