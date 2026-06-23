@@ -34,15 +34,29 @@ except Exception as e:
     print(f"⚠️ AI recruitment module not loaded: {e}")
 
 # ================= FACE RECOGNITION BACKEND =================
-# Note: the `face_recognition` library calls quit() (raising SystemExit) and
-# prints a notice when its model files are missing. We silence that output and
-# catch BaseException so a missing/optional face backend never stops the server
-# — attendance simply runs in simulator/mock mode.
+# When its model files are missing, the `face_recognition` library prints a
+# notice and calls the built-in quit(), which (a) raises SystemExit and
+# (b) CLOSES sys.stdin. (a) would stop the server and (b) would later crash the
+# Flask debug reloader on sys.stdin.isatty(). So during the import we:
+#   - silence stdout/stderr (hide the notice),
+#   - replace quit()/exit() with a no-op that doesn't touch stdin,
+#   - catch BaseException so a missing/optional backend never stops the server.
+# Result: attendance simply runs in simulator/mock mode.
+import sys
 import io
+import builtins
 import contextlib
 
 FACE_REC_AVAILABLE = False
+_orig_quit, _orig_exit = builtins.quit, builtins.exit
+
+
+def _safe_exit(code=None):
+    raise SystemExit(code)
+
+
 try:
+    builtins.quit = builtins.exit = _safe_exit  # don't let the lib close stdin
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         import face_recognition
     FACE_REC_AVAILABLE = True
@@ -50,6 +64,15 @@ try:
 except BaseException:
     FACE_REC_AVAILABLE = False
     print("ℹ️ face_recognition inactive — running in simulator mode (facial attendance disabled).")
+finally:
+    builtins.quit, builtins.exit = _orig_quit, _orig_exit
+    # Safety net: if stdin somehow got closed, restore a usable handle so the
+    # Werkzeug reloader (debug=True) doesn't crash on isatty().
+    if sys.stdin is None or getattr(sys.stdin, "closed", False):
+        try:
+            sys.stdin = open(os.devnull, "r")
+        except Exception:
+            pass
 
 # ================= CRYPTOGRAPHIC SIGNATURE CHECK =================
 def verify_qr_signature(secret_key, employee_id, timestamp, token, signature):
