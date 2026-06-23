@@ -3,6 +3,7 @@ import { supabase } from '../supabase';
 import { useNavigate } from 'react-router-dom';
 import { QRCode } from "react-qr-code";
 import AnalysePointage from "./AnalysePointage";
+import RecrutementPanel from "./RecrutementPanel";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 export default function AdministrateurDashboard() {
@@ -792,6 +793,12 @@ export default function AdministrateurDashboard() {
             <span>📱</span> Badges QR
           </div>
 
+          <div style={styles.divider}>Recrutement IA</div>
+
+          <div style={activeTab === 'recrutement' ? styles.navItemActive : styles.navItem} onClick={() => { setActiveTab('recrutement'); setSidebarOpen(false); }}>
+            <span>🤖</span> Analyse CV (IA)
+          </div>
+
           <div style={styles.divider}>Bac à Sable</div>
 
           <div style={activeTab === 'simulator' ? styles.navItemActiveSim : styles.navItemSim} onClick={() => { setActiveTab('simulator'); setSidebarOpen(false); }}>
@@ -829,6 +836,11 @@ export default function AdministrateurDashboard() {
 
         <div style={styles.content}>
           {loading && <div style={styles.loader}>Synchronisation Cloud en cours...</div>}
+
+          {/* ================= TAB: RECRUTEMENT IA ================= */}
+          {activeTab === 'recrutement' && (
+            <RecrutementPanel currentUser={currentUser} companyId={currentCompanyId} />
+          )}
 
           {/* ================= TAB 1: DASHBOARD HOME ================= */}
           {activeTab === 'dashboard' && (

@@ -158,6 +158,14 @@ export default function Sidebar() {
                   <span>📱</span> Générer Badges QR
                 </div>
               )}
+
+              {isAdmin && <div style={styles.divider}>Recrutement IA</div>}
+
+              {isAdmin && (
+                <div style={activeItem === 'recrutement' ? styles.navItemActive : styles.navItem} onClick={() => handleNav('/recrutement')}>
+                  <span>🤖</span> Analyse CV (IA)
+                </div>
+              )}
             </>
           )}
         </nav>

@@ -63,6 +63,9 @@ function App() {
           <Route path="/admin/employees/create" element={<CreerEmploye />} />
           <Route path="/employees/:id" element={<EmployeProfil />} />
 
+          {/* AI RECRUITMENT — now an embedded tab inside the dashboard */}
+          <Route path="/recrutement" element={<Navigate to="/home" />} />
+
           {/* FALLBACK */}
           <Route path="*" element={<Navigate to="/" />} />
 

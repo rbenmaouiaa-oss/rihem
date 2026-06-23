@@ -1,22 +1,37 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import os
 import cv2
 import numpy as np
 import base64
 import hmac
 import hashlib
 import json
+from dotenv import load_dotenv
 from supabase import create_client, Client
 from datetime import datetime, timezone, timedelta
 
+# Load environment variables from .env (Groq key, Supabase creds, ...)
+load_dotenv()
+
 # ================= SUPABASE CONFIG =================
-url = "https://npouyrppjqbxifuvpqan.supabase.co"
-key = "sb_secret_i1bGnoLOPvDPJuHfiV4znw_ynOW3raJ"  # Public Anon / Secret Token for sandbox development
+# Prefer environment variables; fall back to the sandbox values for dev.
+url = os.getenv("SUPABASE_URL", "https://npouyrppjqbxifuvpqan.supabase.co")
+key = os.getenv("SUPABASE_KEY", "sb_secret_i1bGnoLOPvDPJuHfiV4znw_ynOW3raJ")
 supabase: Client = create_client(url, key)
 
 # ================= FLASK SETUP =================
 app = Flask(__name__)
 CORS(app)  # Enable Cross-Origin Resource Sharing for browser simulator integration
+
+# ================= AI RECRUITMENT MODULE (Groq) =================
+# Registers /api/ai/* routes (CV analyser, classifier, job matching).
+try:
+    from recruitment_api import recruitment_bp
+    app.register_blueprint(recruitment_bp)
+    print("🤖 AI recruitment module loaded (/api/ai/*)")
+except Exception as e:
+    print(f"⚠️ AI recruitment module not loaded: {e}")
 
 # ================= FACE RECOGNITION BACKEND =================
 try:

@@ -256,9 +256,40 @@ def classify_reclamation(subject: str, message: str):
     return predicted_priority, best_cat, round(confidence, 2)
 
 
+# Try to load the Groq LLM engine; fall back to keyword rules if unavailable.
+try:
+    import llm_engine
+    _LLM_OK = bool(llm_engine.GROQ_API_KEY)
+except Exception:
+    _LLM_OK = False
+
+
+def classify_reclamation_smart(subject: str, message: str):
+    """
+    Returns (priority, category, confidence, extra) using the Groq LLM when
+    available, otherwise the keyword classifier. `extra` carries sentiment,
+    summary and the suggested reply (empty dict in fallback mode).
+    """
+    if _LLM_OK:
+        res = llm_engine.classify_reclamation(subject, message)
+        if not res.get("_error"):
+            return (
+                res.get("priority", "normal"),
+                res.get("category", "Autre"),
+                res.get("confidence", 0.7),
+                {
+                    "sentiment": res.get("sentiment"),
+                    "summary": res.get("summary"),
+                    "suggested_reply": res.get("suggested_reply"),
+                },
+            )
+    p, c, conf = classify_reclamation(subject, message)
+    return p, c, conf, {}
+
+
 def analyze_reclamations():
     print("\n" + "="*60)
-    print("  SENTIMENT ANALYSIS ENGINE")
+    print("  SENTIMENT ANALYSIS ENGINE  " + ("[LLM:Groq]" if _LLM_OK else "[keywords]"))
     print("="*60)
 
     resp = supabase.table("reclamations") \
@@ -272,18 +303,27 @@ def analyze_reclamations():
 
     print(f"  Analyzing {len(recs)} reclamations...\n")
 
-    stats = {"normal": 0, "urgent": 0, "category_counts": {}}
+    stats = {"normal": 0, "urgent": 0, "faible": 0, "category_counts": {}}
     for rec in recs:
         subj = rec.get("subject", "")
         msg = rec.get("message", "")
-        predicted_priority, predicted_category, confidence = classify_reclamation(subj, msg)
+        predicted_priority, predicted_category, confidence, extra = \
+            classify_reclamation_smart(subj, msg)
+
+        update = {
+            "ai_predicted_priority": predicted_priority,
+            "ai_predicted_category": predicted_category,
+            "ai_confidence": confidence,
+        }
+        if extra.get("sentiment"):
+            update["ai_sentiment"] = extra["sentiment"]
+        if extra.get("summary"):
+            update["ai_summary"] = extra["summary"]
+        if extra.get("suggested_reply"):
+            update["ai_suggested_reply"] = extra["suggested_reply"]
 
         supabase.table("reclamations") \
-            .update({
-                "ai_predicted_priority": predicted_priority,
-                "ai_predicted_category": predicted_category,
-                "ai_confidence": confidence,
-            }) \
+            .update(update) \
             .eq("id", rec["id"]) \
             .execute()
 
