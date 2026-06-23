@@ -34,13 +34,22 @@ except Exception as e:
     print(f"⚠️ AI recruitment module not loaded: {e}")
 
 # ================= FACE RECOGNITION BACKEND =================
+# Note: the `face_recognition` library calls quit() (raising SystemExit) and
+# prints a notice when its model files are missing. We silence that output and
+# catch BaseException so a missing/optional face backend never stops the server
+# — attendance simply runs in simulator/mock mode.
+import io
+import contextlib
+
+FACE_REC_AVAILABLE = False
 try:
-    import face_recognition
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        import face_recognition
     FACE_REC_AVAILABLE = True
     print("🚀 face_recognition library successfully loaded!")
-except ImportError:
+except BaseException:
     FACE_REC_AVAILABLE = False
-    print("⚠️ face_recognition not available. Running in resilient Simulator-Mock fallback mode.")
+    print("ℹ️ face_recognition inactive — running in simulator mode (facial attendance disabled).")
 
 # ================= CRYPTOGRAPHIC SIGNATURE CHECK =================
 def verify_qr_signature(secret_key, employee_id, timestamp, token, signature):
