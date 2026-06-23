@@ -42,7 +42,7 @@ export default function ResetPassword() {
       <div style={styles.brandSide}>
         <div style={styles.brandOverlay} />
         <div style={styles.brandContent}>
-          <h2 style={styles.brandLogo}>LAVANCE-</h2>
+          <img src="/Logo.png" alt="Aca Robotics" style={{ height: '80px', width: 'auto', objectFit: 'contain', alignSelf: 'flex-start', backgroundColor: '#112A6D', padding: '8px', borderRadius: '8px' }} />
           <div style={styles.brandCenterText}>
             <h1 style={styles.brandTitle}>Modifier le mot de passe</h1>
             <p style={styles.brandSubtitle}>
@@ -101,7 +101,7 @@ export default function ResetPassword() {
 
 const styles = {
   wrapper: { display: 'flex', minHeight: '100vh', backgroundColor: 'var(--bg-app)', fontFamily: 'var(--font-sans)', overflow: 'hidden' },
-  brandSide: { flex: 1.2, position: 'relative', backgroundColor: '#0b0f19', backgroundSize: 'cover', backgroundPosition: 'center', backgroundImage: 'linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '50px' },
+  brandSide: { flex: 1.2, position: 'relative', backgroundColor: '#112A6D', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '50px' },
   brandOverlay: { position: 'absolute', inset: 0, backgroundColor: 'rgba(15, 23, 42, 0.1)', backdropFilter: 'radial-gradient(circle at top right, rgba(37, 99, 235, 0.15), transparent)', pointerEvents: 'none' },
   brandContent: { position: 'relative', zIndex: 10, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' },
   brandLogo: { fontSize: '22px', fontWeight: '800', color: '#ffffff', letterSpacing: '1.5px', fontFamily: 'var(--font-heading)' },

@@ -146,8 +146,8 @@ String base64Encode(uint8_t* data, size_t length) {
   return result;
 }
 
-// ================= NETWORK: SEND SCAN QR PAYLOAD =================
-bool sendQrPayload(String qrPayload) {
+// ================= NETWORK: SEND QR TOKEN (simple QR code from badge) =================
+bool sendQrToken(String qrToken) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("🔌 Network Offline! Buffering check-in locally.");
     offlineMode = true;
@@ -155,13 +155,12 @@ bool sendQrPayload(String qrPayload) {
   }
   
   HTTPClient http;
-  http.begin(serverUrl + "/api/device/scan-qr");
+  http.begin(serverUrl + "/api/device/scan-qr-token");
   http.addHeader("Content-Type", "application/json");
   
-  // Compile payload JSON
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<256> doc;
   doc["device_uid"] = deviceUid;
-  doc["qr_payload"] = qrPayload;
+  doc["qr_token"] = qrToken;
   
   String jsonBody;
   serializeJson(doc, jsonBody);
@@ -179,14 +178,14 @@ bool sendQrPayload(String qrPayload) {
       activeEmployeeId = resDoc["employee_id"].as<String>();
       activeEmployeeName = resDoc["prenom"].as<String>() + " " + resDoc["nom"].as<String>();
       
-      Serial.printf("✅ QR Code Valid! Employee authorized: %s\n", activeEmployeeName.c_str());
-      triggerAlertPattern(LED_GREEN, 1, 150); // Accepted short beep
+      Serial.printf("✅ QR Code Valid! Employee: %s\n", activeEmployeeName.c_str());
+      triggerAlertPattern(LED_GREEN, 1, 150);
       http.end();
       return true;
     }
   } else {
-    Serial.printf("⛔ QR Validation failed. Code: %d, Response: %s\n", httpCode, http.getString().c_str());
-    triggerAlertPattern(LED_RED, 1, 600); // Rejection beep
+    Serial.printf("⛔ QR rejected. Code: %d\n", httpCode);
+    triggerAlertPattern(LED_RED, 1, 600);
   }
   
   http.end();
@@ -304,7 +303,7 @@ void loop() {
     if (payload.length() > 0) {
       Serial.printf("📡 Emulated Scanner scan event: %s\n", payload.c_str());
       
-      if (sendQrPayload(payload)) {
+      if (sendQrToken(payload)) {
         // QR authorized -> Start capture
         delay(1000); // Await user focus
         captureAndVerifyFace();

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase';
+import Sidebar from '../Sidebar';
 
 export default function Profil() {
   const navigate = useNavigate();
@@ -110,31 +111,7 @@ export default function Profil() {
 
   return (
     <div style={styles.container}>
-      {/* SIDEBAR */}
-      <aside style={styles.sidebar}>
-        <div style={styles.logoSection}>
-          <img src="/logo.png" alt="Aca ROBOTICS" style={styles.logoImage} onError={(e) => { e.target.style.display='none'; }} />
-          <h1 style={styles.logoTextFallback}>Aca ROBOTICS</h1>
-        </div>
-        
-        <nav style={styles.nav}>
-          <div style={styles.navItem} onClick={() => navigate('/home')}>📊 TABLEAU DE BORD</div>
-          <div style={styles.navItemActive} onClick={() => navigate('/profil')}>👤 MON PROFIL</div>
-          <div style={styles.navItem} onClick={() => navigate('/fiche-pointage')}>📅 FICHE DE POINTAGE</div>
-          <div style={styles.navItem} onClick={() => navigate('/equipes')}>👥 MES ÉQUIPES</div>
-          <div style={styles.navItem} onClick={() => navigate('/creer-equipe')}>👥 CRÉER ÉQUIPES</div>
-          <div style={styles.navItem} onClick={() => navigate('/creer-planning')}>🗓️ MON PLANNING</div>
-          
-          <div style={styles.navDivider}>SIMULATEURS DE TERMINAL</div>
-          <div style={styles.navItemSim} onClick={() => navigate('/scanner-facial')}>👤 Simuler Scan Facial</div>
-          <div style={styles.navItemSim} onClick={() => navigate('/scanner-qr')}>🎫 Simuler Scan QR</div>
-        </nav>
-
-        <div style={styles.sidebarFooter}>
-          <div style={styles.logout} onClick={() => navigate('/')}>🚪 DÉCONNEXION</div>
-          <button style={styles.backButton} onClick={() => navigate(-1)}>←</button>
-        </div>
-      </aside>
+      <Sidebar />
 
       {/* MAIN CONTENT */}
       <main style={styles.main}>
@@ -142,7 +119,7 @@ export default function Profil() {
         <header style={styles.header}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
             <h2 style={styles.headerTitle}>L'AVANCE</h2>
-            <span style={styles.badgeHeader}>ECOSYSTEM ADMIN</span>
+            <span style={styles.badgeHeader}>ADMIN</span>
           </div>
           <div style={styles.userProfile}>
             <div style={styles.userAvatar}>{initials[0]}</div>
@@ -352,18 +329,7 @@ export default function Profil() {
 
 const styles = {
   container: { display: 'flex', minHeight: '100vh', backgroundColor: 'var(--bg-app)', fontFamily: 'var(--font-sans)', overflow: 'hidden' },
-  sidebar: { width: '280px', backgroundColor: 'var(--bg-sidebar)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', position: 'fixed', height: '100vh', zIndex: 10, padding: '15px' },
-  logoSection: { padding: '20px', textAlign: 'center', marginBottom: '20px', borderBottom: '1px solid var(--border)' },
-  logoImage: { width: '180px', maxHeight: '50px', objectFit: 'contain' },
-  logoTextFallback: { fontSize: '20px', fontWeight: '800', color: 'var(--primary)', fontFamily: 'var(--font-heading)' },
-  navDivider: { padding: '15px 20px 5px 20px', fontSize: '10px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px' },
-  navItemSim: { padding: '10px 20px', fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)', cursor: 'pointer', borderRadius: '10px', transition: 'var(--transition-smooth)', backgroundColor: 'var(--bg-app)', border: '1px solid var(--border)', marginLeft: '10px', marginRight: '10px', marginBottom: '5px' },
-  nav: { flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' },
-  navItem: { padding: '14px 20px', fontSize: '13px', fontWeight: '600', color: 'var(--text-muted)', cursor: 'pointer', borderRadius: '10px', transition: 'var(--transition-smooth)', display: 'flex', alignItems: 'center', gap: '12px' },
-  navItemActive: { padding: '14px 20px', fontSize: '13px', fontWeight: '700', backgroundColor: 'var(--primary)', color: 'var(--text-white)', cursor: 'pointer', borderRadius: '10px', boxShadow: '0 4px 14px rgba(37, 99, 235, 0.25)', transition: 'var(--transition-smooth)', display: 'flex', alignItems: 'center', gap: '12px' },
-  sidebarFooter: { padding: '15px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '10px' },
-  logout: { fontSize: '13px', fontWeight: '600', color: 'var(--danger)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', padding: '10px' },
-  backButton: { width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid var(--border)', cursor: 'pointer', backgroundColor: 'var(--bg-card)', color: 'var(--text-main)', fontWeight: 'bold', transition: 'var(--transition-smooth)' },
+
   main: { flex: 1, marginLeft: '280px', display: 'flex', flexDirection: 'column', minHeight: '100vh', overflowY: 'auto' },
   header: { height: '70px', backgroundColor: 'var(--bg-header)', backdropFilter: 'blur(10px)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 40px', position: 'sticky', top: 0, zIndex: 5 },
   headerTitle: { fontSize: '20px', fontWeight: '800', fontFamily: 'var(--font-heading)', color: 'var(--primary)', letterSpacing: '1px' },

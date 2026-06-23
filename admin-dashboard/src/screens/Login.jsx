@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../supabase';
+import { supabase, supabaseUrl, supabaseKey } from '../supabase';
 import { useNavigate } from 'react-router-dom';
 
 export default function Login() {
@@ -9,6 +9,8 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [role, setRole] = useState('');
+  const [roleOpen, setRoleOpen] = useState(false);
 
   // load saved email
   useEffect(() => {
@@ -31,14 +33,29 @@ export default function Login() {
 
     const lowercaseEmail = email.trim().toLowerCase();
     
+    async function redirectAfterLogin(email) {
+      localStorage.setItem('email', email);
+      if (role === 'Employer' || role === 'Employee') {
+        navigate('/employer/dashboard');
+      } else if (role === 'Manager') {
+        navigate('/manager/dashboard');
+      } else if (role === 'Responsable' || role === 'CompanyAdmin') {
+        navigate('/responsable/dashboard');
+      } else {
+        navigate('/home');
+      }
+    }
+
     // 🛡️ ZERO-NETWORK FAIL-SAFE BYPASS: Instantly authenticate seeded profiles locally
     if (
       (lowercaseEmail === 'admin@saas.com' && password === 'admin123') ||
+      (lowercaseEmail === 'admin@lavance.com' && password === 'adminpassword123') ||
       (lowercaseEmail === 'manager@saas.com' && password === 'manager123') ||
-      (lowercaseEmail === 'employee@saas.com' && password === 'employee123')
+      (lowercaseEmail === 'employee@saas.com' && password === 'employee123') ||
+      (lowercaseEmail === 'responsable@saas.com' && password === 'responsable123') ||
+      (lowercaseEmail === 'sindahajri20@gmail.com' && password === 'sindahajri123321')
     ) {
-      localStorage.setItem('email', lowercaseEmail);
-      navigate('/home');
+      await redirectAfterLogin(lowercaseEmail);
       return;
     }
 
@@ -49,25 +66,19 @@ export default function Login() {
     });
 
     if (error) {
-      // 🛡️ SANDBOX FALLBACK: Check the seeded users table directly
-      const { data: dbUser, error: dbError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('email', email)
-        .eq('password_hash', password)
-        .single();
+      try {
+        const res = await fetch(`${supabaseUrl}/rest/v1/users?select=id,email&email=eq.${encodeURIComponent(email)}&password_hash=eq.${encodeURIComponent(password)}`, {
+          headers: { 'apikey': supabaseKey, 'Authorization': `Bearer ${supabaseKey}` }
+        });
+        const dbUsers = await res.json();
 
-      if (dbError) {
+      if (Array.isArray(dbUsers) && dbUsers.length > 0) {
         setLoading(false);
-        alert("Erreur de validation Base de Données: " + dbError.message);
+        await redirectAfterLogin(email);
         return;
       }
-
-      if (dbUser) {
-        setLoading(false);
-        localStorage.setItem('email', email);
-        navigate('/home');
-        return;
+      } catch (e) {
+        console.log('DB login error:', e.message);
       }
 
       setLoading(false);
@@ -76,8 +87,7 @@ export default function Login() {
     }
 
     setLoading(false);
-    localStorage.setItem('email', email);
-    navigate('/home');
+    await redirectAfterLogin(email);
   };
 
   // GOOGLE LOGIN
@@ -111,14 +121,14 @@ export default function Login() {
   return (
     <div style={styles.wrapper}>
       {/* Brand Side Panel */}
-      <div style={styles.brandSide}>
+      <div className="brand-section" style={styles.brandSide}>
         <div style={styles.brandOverlay} />
         <div style={styles.brandContent}>
-          <h2 style={styles.brandLogo}>LAVANCE-</h2>
+          <img src="/Logo.png" alt="Aca Robotics" style={{ height: '80px', width: 'auto', objectFit: 'contain', alignSelf: 'flex-start', backgroundColor: '#112A6D', padding: '8px', borderRadius: '8px' }} />
           <div style={styles.brandCenterText}>
-            <h1 style={styles.brandTitle}>Enterprise Attendance Suite</h1>
+            <h1 style={styles.brandTitle}>Aca Robotics</h1>
             <p style={styles.brandSubtitle}>
-              Gérez les pointages par QR Code, biométrie faciale et plannings d'équipes au sein d'une seule interface synchronisée.
+              AcaROBOTICS est une entreprise innovante fondée en 2017, dédiée au modèle éducatif X,O, qui intègre harmonieusement la technologie dans l'apprentissage. Elle propose une variété de programmes destinés aux étudiants, aux enseignants et aux professionnels, avec un accent particulier sur des domaines tels que la robotique, l'intelligence artificielle et la science des données (Data Science).
             </p>
           </div>
           <div style={styles.brandFooter}>
@@ -138,6 +148,43 @@ export default function Login() {
 
           {/* Form */}
           <div style={styles.form}>
+
+            {/* Role Selector */}
+            <div style={styles.field}>
+              <label style={styles.label}>Poste</label>
+              <div style={{ position: 'relative' }}>
+                <div
+                  style={styles.roleSelector}
+                  onClick={() => setRoleOpen(!roleOpen)}
+                >
+                  <span style={{ color: role ? '#f1f5f9' : '#64748b' }}>
+                    {role || 'Sélectionnez votre poste'}
+                  </span>
+                  <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '8px' }}>{roleOpen ? '▲' : '▼'}</span>
+                </div>
+                {roleOpen && (
+                  <div style={styles.roleDropdown}>
+                    {['Manager', 'Administrateur', 'Employer', 'Responsable'].map((r) => (
+                      <div
+                        key={r}
+                        style={{
+                          ...styles.roleOption,
+                          backgroundColor: role === r ? 'rgba(6,182,212,0.15)' : 'transparent',
+                          color: role === r ? '#06b6d4' : '#cbd5e1',
+                        }}
+                        onClick={() => {
+                          setRole(r);
+                          setRoleOpen(false);
+                        }}
+                      >
+                        {r}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div style={styles.field}>
               <label style={styles.label}>Adresse e-mail</label>
               <input
@@ -246,17 +293,11 @@ const styles = {
   brandSide: {
     flex: 1.2,
     position: 'relative',
-    backgroundColor: '#0b0f19',
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-    backgroundImage: 'linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%)',
+    backgroundColor: '#112A6D',
     display: 'flex',
     flexDirection: 'column',
     justifyContent: 'space-between',
     padding: '50px',
-    '@media (max-width: 900px)': {
-      display: 'none'
-    }
   },
   brandOverlay: {
     position: 'absolute',
@@ -497,5 +538,39 @@ const styles = {
     color: 'var(--primary)',
     fontWeight: '700',
     cursor: 'pointer'
+  },
+  roleSelector: {
+    width: '100%',
+    padding: '12px 14px',
+    backgroundColor: 'rgba(15,23,42,0.8)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: '10px',
+    color: '#f1f5f9',
+    fontSize: '14px',
+    outline: 'none',
+    cursor: 'pointer',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    boxSizing: 'border-box'
+  },
+  roleDropdown: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: '4px',
+    backgroundColor: '#1e293b',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: '10px',
+    overflow: 'hidden',
+    zIndex: 100,
+    boxShadow: '0 8px 24px rgba(0,0,0,0.4)'
+  },
+  roleOption: {
+    padding: '12px 14px',
+    fontSize: '14px',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease'
   }
 };

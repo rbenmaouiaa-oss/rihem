@@ -17,7 +17,7 @@ export default function VerifyOTP({ route, navigation }: any) {
     const cleanCode = code.trim()
 
     if (cleanCode.length < 6) {
-      Alert.alert('Error', 'Please enter valid code')
+      Alert.alert('Erreur', 'Veuillez saisir un code valide')
       return
     }
 
@@ -32,7 +32,7 @@ export default function VerifyOTP({ route, navigation }: any) {
       return
     }
 
-    Alert.alert('Success', 'Code verified 🔐')
+    Alert.alert('Succès', 'Code vérifié 🔐')
 
     navigation.navigate('ResetPassword')
   }
@@ -40,14 +40,14 @@ export default function VerifyOTP({ route, navigation }: any) {
   return (
     <View style={styles.container}>
 
-      <Text style={styles.title}>Verify Code</Text>
+      <Text style={styles.title}>Vérification</Text>
 
       <Text style={styles.subtitle}>
-        Enter the code sent to your email
+        Saisissez le code envoyé à votre email
       </Text>
 
       <TextInput
-        placeholder="Enter code"
+        placeholder="Code à 6 chiffres"
         keyboardType="numeric"
         value={code}
         onChangeText={setCode}
@@ -56,7 +56,7 @@ export default function VerifyOTP({ route, navigation }: any) {
       />
 
       <TouchableOpacity style={styles.button} onPress={verify}>
-        <Text style={styles.buttonText}>Verify</Text>
+        <Text style={styles.buttonText}>Vérifier</Text>
       </TouchableOpacity>
 
     </View>

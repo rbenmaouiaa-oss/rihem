@@ -18,12 +18,12 @@ export default function ResetPassword({ navigation }: any) {
   const updatePassword = async () => {
 
     if (!password || !confirmPassword) {
-      Alert.alert('Error', 'Please fill all fields')
+      Alert.alert('Erreur', 'Veuillez remplir tous les champs')
       return
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match')
+      Alert.alert('Erreur', 'Les mots de passe ne correspondent pas')
       return
     }
 
@@ -32,11 +32,11 @@ export default function ResetPassword({ navigation }: any) {
     })
 
     if (error) {
-      Alert.alert('Error', error.message)
+      Alert.alert('Erreur', error.message)
       return
     }
 
-    Alert.alert('Success', 'Password updated 🔐')
+    Alert.alert('Succès', 'Mot de passe mis à jour 🔐')
 
     // 🔥 يرجع للـ Login
     navigation.reset({
@@ -50,10 +50,10 @@ export default function ResetPassword({ navigation }: any) {
 
       <View style={styles.card}>
 
-        <Text style={styles.title}>New Password</Text>
+        <Text style={styles.title}>Nouveau mot de passe</Text>
 
         <TextInput
-          placeholder="New Password"
+          placeholder="Nouveau mot de passe"
           secureTextEntry
           value={password}
           onChangeText={setPassword}
@@ -61,7 +61,7 @@ export default function ResetPassword({ navigation }: any) {
         />
 
         <TextInput
-          placeholder="Confirm Password"
+          placeholder="Confirmer le mot de passe"
           secureTextEntry
           value={confirmPassword}
           onChangeText={setConfirmPassword}
@@ -69,7 +69,7 @@ export default function ResetPassword({ navigation }: any) {
         />
 
         <TouchableOpacity style={styles.button} onPress={updatePassword}>
-          <Text style={styles.buttonText}>OK</Text>
+          <Text style={styles.buttonText}>Valider</Text>
         </TouchableOpacity>
 
       </View>

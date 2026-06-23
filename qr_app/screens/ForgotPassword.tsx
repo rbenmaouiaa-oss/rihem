@@ -68,7 +68,7 @@ export default function ForgotPassword({ navigation }: any) {
 
   const sendCode = async () => {
     if (!email) {
-      Alert.alert('Error', 'Please enter your email')
+      Alert.alert('Erreur', 'Veuillez saisir votre email')
       return
     }
 
@@ -81,7 +81,7 @@ export default function ForgotPassword({ navigation }: any) {
       return
     }
 
-    Alert.alert('Success', 'Check your email 📩')
+    Alert.alert('Succès', 'Consultez votre email 📩')
   }
 
   return (
@@ -91,16 +91,16 @@ export default function ForgotPassword({ navigation }: any) {
     >
       <View style={styles.card}>
 
-        <Text style={styles.title}>Reset Password</Text>
+        <Text style={styles.title}>Réinitialisation</Text>
 
         <Text style={styles.description}>
-          Enter your email and we will send you a reset link.
+          Saisissez votre email pour recevoir un lien de réinitialisation.
         </Text>
 
         <Text style={styles.label}>Email</Text>
 
         <TextInput
-          placeholder="example@email.com"
+          placeholder="nom@email.com"
           placeholderTextColor="#999"
           value={email}
           onChangeText={setEmail}
@@ -110,11 +110,11 @@ export default function ForgotPassword({ navigation }: any) {
         />
 
         <TouchableOpacity style={styles.button} onPress={sendCode}>
-          <Text style={styles.buttonText}>Continue</Text>
+          <Text style={styles.buttonText}>Continuer</Text>
         </TouchableOpacity>
 
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.backText}>Back to Login</Text>
+          <Text style={styles.backText}>Retour à la connexion</Text>
         </TouchableOpacity>
 
       </View>

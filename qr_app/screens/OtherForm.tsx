@@ -31,8 +31,7 @@ export default function OtherForm({ navigation }: any) {
     try {
       await supabase.from('reclamations').insert([{
         employee_email: email,
-        type: 'Autre',
-        subject,
+        subject: subject || 'Autre',
         message,
         status: 'pending',
         created_at: new Date().toISOString()

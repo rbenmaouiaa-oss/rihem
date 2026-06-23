@@ -71,7 +71,7 @@ export default function ReclamationForm({ route, navigation }: any) {
       const { error } = await supabase.from('reclamations').insert([
         {
           employee_email: email,
-          type,
+          subject: type,
           message: message.trim(),
           status: 'pending',
           created_at: new Date().toISOString(),

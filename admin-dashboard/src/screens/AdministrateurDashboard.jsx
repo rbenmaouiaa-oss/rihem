@@ -1,15 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import { useNavigate } from 'react-router-dom';
+import { QRCode } from "react-qr-code";
+import AnalysePointage from "./AnalysePointage";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-export default function Home() {
+export default function AdministrateurDashboard() {
   const navigate = useNavigate();
 
   // ================= STATE VARIABLES =================
   const [currentUser, setCurrentUser] = useState(null);
   const [userRole, setUserRole] = useState('CompanyAdmin'); // 'SuperAdmin', 'CompanyAdmin', 'Manager', 'Employee'
   const [currentCompanyId, setCurrentCompanyId] = useState(null);
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard', 'employees', 'live', 'absences', 'reclamations', 'devices', 'face-profiles', 'reports', 'settings', 'simulator'
+  const [activeTab, setActiveTab] = useState('dashboard');
   
   // Real-time Database Collections
   const [employees, setEmployees] = useState([]);
@@ -21,6 +24,7 @@ export default function Home() {
   const [departments, setDepartments] = useState([]);
   const [branches, setBranches] = useState([]);
   const [shifts, setShifts] = useState([]);
+  const [fraudAlerts, setFraudAlerts] = useState([]);
 
   // Form states & UI toggles
   const [loading, setLoading] = useState(false);
@@ -30,6 +34,8 @@ export default function Home() {
   const [showAbsenceModal, setShowAbsenceModal] = useState(false);
   const [showReclamationModal, setShowReclamationModal] = useState(false);
   const [faceConfidence, setFaceConfidence] = useState(0.48); // Similarity buffer
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [showAnalyseModal, setShowAnalyseModal] = useState(false);
 
   // Dynamic filter forms for Reports
   const [reportDateFrom, setReportDateFrom] = useState('');
@@ -48,9 +54,58 @@ export default function Home() {
   const [simQueuedCount, setSimQueuedCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Stats states
+  const now = new Date();
+  const [statsMonth, setStatsMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
+  const [statsSearch, setStatsSearch] = useState('');
+
+  // QR Badge states
+  const [qrEmployees, setQrEmployees] = useState([]);
+  const [qrSearch, setQrSearch] = useState("");
+  const [qrSelected, setQrSelected] = useState(null);
+  const [qrLoading, setQrLoading] = useState(false);
+  const [qrMessage, setQrMessage] = useState("");
+
+  // Face enrollment states
+  const [faceCameraActive, setFaceCameraActive] = useState(false);
+  const [faceStream, setFaceStream] = useState(null);
+  const [capturedPhoto, setCapturedPhoto] = useState(null);
+  const [enrollingEmpId, setEnrollingEmpId] = useState(null);
+  const [faceProfiles, setFaceProfiles] = useState([]);
+  const [faceEmployees, setFaceEmployees] = useState([]);
+  const [faceSearch, setFaceSearch] = useState('');
+  const [faceMessage, setFaceMessage] = useState('');
+  const [faceLoading, setFaceLoading] = useState(false);
+
+  const loadFaceData = () => {
+    supabase.from('face_profiles').select('*').then(r => { if (r.data) setFaceProfiles(r.data); }).catch(e => console.log('face load err', e));
+    supabase.from('users').select('*').order('created_at', { ascending: false }).limit(200).then(r => { if (r.data) setFaceEmployees(r.data); }).catch(e => console.log('emp load err', e));
+  };
+
+  const faceEmpList = faceEmployees.length > 0 ? faceEmployees : employees;
+
+  const handleCloseCamera = () => {
+    if (faceStream) faceStream.getTracks().forEach(t => t.stop());
+    setFaceStream(null);
+    setFaceCameraActive(false);
+    setCapturedPhoto(null);
+    setEnrollingEmpId(null);
+  };
+
   // New item inputs
-  const [newEmp, setNewEmp] = useState({ nom: '', prenom: '', email: '', role: 'Employee', phone: '', department_id: '', branch_id: '', password: 'password123' });
+  const [newEmp, setNewEmp] = useState({ nom: '', prenom: '', email: '', role: 'Employee', phone: '', department_id: '', branch_id: '', password: 'password123', adresse: '', code_postal: '', ville: '', genre: '', date_naissance: '', date_recrutement: '', type_contrat: '', etat_civil: '', autre_telephone: '' });
   const [newDev, setNewDev] = useState({ name: '', device_uid: '', branch_id: '' });
+
+  useEffect(() => {
+    if (activeTab === 'face-profiles') {
+      loadFaceData();
+    } else if (faceStream) {
+      faceStream.getTracks().forEach(t => t.stop());
+      setFaceStream(null);
+      setFaceCameraActive(false);
+      setCapturedPhoto(null);
+    }
+  }, [activeTab]);
 
   // ================= AUTO-CLOSE ALERTS =================
   const triggerAlert = (type, message) => {
@@ -215,15 +270,22 @@ export default function Home() {
     }
 
     try {
-      let attQuery = supabase.from('attendance_logs').select('*').eq('company_id', companyId);
-      if (role === 'Manager') {
-        const directSubIds = emps.map(e => e.id);
-        attQuery = attQuery.in('employee_id', directSubIds);
+      const directSubIds = role === 'Manager' ? emps.map(e => e.id) : [];
+      let countQuery = supabase.from('attendance_logs').select('id', { count: 'exact', head: true }).eq('company_id', companyId);
+      if (role === 'Manager') countQuery = countQuery.in('employee_id', directSubIds);
+      const { count, error: countError } = await countQuery;
+      if (countError) throw countError;
+      const totalRecords = count || 0;
+      let allAtts = [];
+      const pageSize = 1000;
+      for (let offset = 0; offset < totalRecords; offset += pageSize) {
+        let pageQuery = supabase.from('attendance_logs').select('*').eq('company_id', companyId);
+        if (role === 'Manager') pageQuery = pageQuery.in('employee_id', directSubIds);
+        const { data, error } = await pageQuery.order('created_at', { ascending: false }).range(offset, offset + pageSize - 1);
+        if (error) throw error;
+        allAtts = allAtts.concat(data || []);
       }
-      const { data, error } = await attQuery.order('created_at', { ascending: false });
-      if (error) throw error;
-      const atts = data || [];
-      const mappedAtts = atts.map(att => ({
+      const mappedAtts = allAtts.map(att => ({
         ...att,
         users: emps.find(e => e.id === att.employee_id),
         devices: devs.find(d => d.id === att.device_id)
@@ -284,7 +346,20 @@ export default function Home() {
       console.log("Error loading device_logs:", e.message);
     }
 
+    try {
+      const { data, error } = await supabase.from('fraud_alerts').select('*, users!fraud_alerts_employee_id_fkey(id, nom, prenom, email)').order('created_at', { ascending: false }).limit(50);
+      if (!error) setFraudAlerts(data || []);
+    } catch (e) {
+      console.log("Error loading fraud_alerts:", e.message);
+    }
+
     setLoading(false);
+  };
+
+  const loadDepartments = async () => {
+    if (!currentCompanyId) return;
+    const { data } = await supabase.from('departments').select('*').eq('company_id', currentCompanyId);
+    if (data) setDepartments(data);
   };
 
   // ================= ACTION HANDLERS =================
@@ -308,7 +383,17 @@ export default function Home() {
         password_hash: newEmp.password,
         department_id: newEmp.department_id || null,
         branch_id: newEmp.branch_id || null,
-        manager_id: userRole === 'Manager' ? currentUser.id : null
+        manager_id: userRole === 'Manager' ? currentUser.id : null,
+        adresse: newEmp.adresse || null,
+        code_postal: newEmp.code_postal || null,
+        ville: newEmp.ville || null,
+        status: 'active',
+        genre: newEmp.genre || null,
+        date_naissance: newEmp.date_naissance || null,
+        date_recrutement: newEmp.date_recrutement || null,
+        type_contrat: newEmp.type_contrat || null,
+        etat_civil: newEmp.etat_civil || null,
+        autre_telephone: newEmp.autre_telephone || null
       };
 
       const { data, error } = await supabase.from('users').insert(freshEmp).select();
@@ -316,7 +401,7 @@ export default function Home() {
 
       triggerAlert('success', `Employé ${newEmp.prenom} ${newEmp.nom} créé avec succès.`);
       setShowEmployeeModal(false);
-      setNewEmp({ nom: '', prenom: '', email: '', role: 'Employee', phone: '', department_id: '', branch_id: '', password: 'password123' });
+      setNewEmp({ nom: '', prenom: '', email: '', role: 'Employee', phone: '', department_id: '', branch_id: '', password: 'password123', adresse: '', code_postal: '', ville: '', genre: '', date_naissance: '', date_recrutement: '', type_contrat: '', etat_civil: '', autre_telephone: '' });
       fetchCompanyCollections(currentCompanyId, userRole, currentUser.id);
     } catch (err) {
       triggerAlert('danger', `Erreur de création: ${err.message}`);
@@ -328,7 +413,6 @@ export default function Home() {
   const handleFaceEnrollment = async (empId) => {
     try {
       setLoading(true);
-      // Construct mock high resolution 128 floating point vector representation
       const mockVector = Array.from({ length: 128 }, () => parseFloat((Math.random() * 0.4 - 0.2).toFixed(6)));
       
       const { error } = await supabase.from('face_profiles').upsert({
@@ -340,6 +424,8 @@ export default function Home() {
       if (error) throw error;
       triggerAlert('success', 'Signature faciale IA 128-D générée avec succès.');
       fetchCompanyCollections(currentCompanyId, userRole, currentUser.id);
+      const { data } = await supabase.from('face_profiles').select('*');
+      setFaceProfiles(data || []);
     } catch (err) {
       triggerAlert('danger', `Erreur encodage: ${err.message}`);
       setLoading(false);
@@ -500,12 +586,12 @@ export default function Home() {
 
       // Wait 1.5s to simulate visual focus
       setTimeout(async () => {
-        // Send base64 picture placeholder
-        const base64Placeholder = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/';
-        
+        // Send base64 picture placeholder (valid 1x1 JPEG)
+        const base64Placeholder = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AKwA=';
+
         let simFacePayload = base64Placeholder;
         if (simFaceState === 'mismatch') {
-          simFacePayload = 'data:image/jpeg;base64,MISMATCH_IMAGE_STREAM';
+          simFacePayload = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AKwA=';
         }
 
         try {
@@ -532,6 +618,10 @@ export default function Home() {
             setSimTerminalScreen('Face not recognized');
             setSimLedColor('#ef4444');
             setSimBuzzerState('Long Buzz');
+            if (faceData.alert) {
+              triggerAlert('warning', 'Alerte : Visage non reconnu — notification envoyée à l\'admin');
+              fetchCompanyCollections(currentCompanyId, userRole, currentUser.id);
+            }
           }
         } catch (e) {
           setSimTerminalScreen('Internet problem');
@@ -549,17 +639,22 @@ export default function Home() {
       // Manually add mock pointage row in Supabase
       const mockEmp = employees.find(e => e.id === simEmployeeId) || employees[0];
       if (mockEmp) {
-        await supabase.from('attendance_logs').insert({
-          company_id: currentCompanyId,
-          employee_id: mockEmp.id,
-          type: 'check_in',
-          status: 'present',
-          qr_verified: true,
-          face_verified: true,
-          face_score: 0.31,
-          date: new Date().toISOString().split('T')[0],
-          time: new Date().toLocaleTimeString('fr-FR')
-        });
+        if (simFaceState === 'mismatch') {
+          triggerAlert('warning', 'Alerte : Visage non reconnu pour ' + mockEmp.prenom + ' ' + mockEmp.nom);
+        } else {
+          await supabase.from('attendance_logs').insert({
+            company_id: currentCompanyId,
+            employee_id: mockEmp.id,
+            type: 'check_in',
+            status: 'present',
+            qr_verified: true,
+            face_verified: true,
+            face_score: 0.31,
+            date: new Date().toISOString().split('T')[0],
+            time: new Date().toLocaleTimeString('fr-FR')
+          });
+          triggerAlert('success', 'Pointage enregistré avec succès !');
+        }
         fetchCompanyCollections(currentCompanyId, userRole, currentUser.id);
       }
     }
@@ -644,8 +739,8 @@ export default function Home() {
       {/* 2. DYNAMIC PREMIUM SIDEBAR */}
       <aside className={`sidebar-responsive ${sidebarOpen ? 'open' : ''}`}>
         <div style={styles.logoSection}>
-          <h2 style={styles.logoText}>LAVANCE<span>.</span></h2>
-          <span style={styles.roleBadge}>{userRole.toUpperCase()}</span>
+          <img src="/Logo.png" alt="Aca Robotics" style={{ height: '60px', width: 'auto', objectFit: 'contain', backgroundColor: '#112A6D', padding: '6px', borderRadius: '8px' }} />
+          <span style={styles.roleBadge}>{({ CompanyAdmin: 'ADMINISTRATEUR', SuperAdmin: 'ADMINISTRATEUR', Manager: 'MANAGER', Employee: 'EMPLOYÉ' })[userRole] || userRole.toUpperCase()}</span>
         </div>
         
         <nav style={styles.nav}>
@@ -653,26 +748,14 @@ export default function Home() {
             <span>📊</span> Tableau de Bord
           </div>
           
+          <div style={styles.divider}>Pointage</div>
+
           <div style={activeTab === 'live' ? styles.navItemActive : styles.navItem} onClick={() => { setActiveTab('live'); setSidebarOpen(false); }}>
-            <span>⏱️</span> Moniteur Live
+            <span>⏱️</span> Pointage
           </div>
 
           <div style={activeTab === 'employees' ? styles.navItemActive : styles.navItem} onClick={() => { setActiveTab('employees'); setSidebarOpen(false); }}>
             <span>👥</span> Employés Registry
-          </div>
-
-          <div style={activeTab === 'absences' ? styles.navItemActive : styles.navItem} onClick={() => { setActiveTab('absences'); setSidebarOpen(false); }}>
-            <span>📅</span> Congés / Absences
-            {absences.filter(a => a.admin_status === 'pending').length > 0 && (
-              <span style={styles.navBadgeRed}>{absences.filter(a => a.admin_status === 'pending').length}</span>
-            )}
-          </div>
-
-          <div style={activeTab === 'reclamations' ? styles.navItemActive : styles.navItem} onClick={() => { setActiveTab('reclamations'); setSidebarOpen(false); }}>
-            <span>💬</span> Support Tickets
-            {reclamations.filter(r => r.status === 'new').length > 0 && (
-              <span style={styles.navBadgeAmber}>{reclamations.filter(r => r.status === 'new').length}</span>
-            )}
           </div>
 
           <div style={activeTab === 'devices' ? styles.navItemActive : styles.navItem} onClick={() => { setActiveTab('devices'); setSidebarOpen(false); }}>
@@ -687,8 +770,26 @@ export default function Home() {
             <span>📝</span> Rapport de Paie
           </div>
 
-          <div style={activeTab === 'settings' ? styles.navItemActive : styles.navItem} onClick={() => { setActiveTab('settings'); setSidebarOpen(false); }}>
-            <span>⚙️</span> Paramètres RH
+          <div style={{
+            ...styles.navItem,
+            backgroundColor: activeTab === 'alertes' ? 'rgba(239,68,68,0.12)' : 'transparent',
+            color: activeTab === 'alertes' ? '#ef4444' : '#94a3b8',
+            borderLeft: activeTab === 'alertes' ? '3px solid #ef4444' : '3px solid transparent'
+          }} onClick={() => { setActiveTab('alertes'); setSidebarOpen(false); }}>
+            <span>🔔</span> Alertes{fraudAlerts.length > 0 && (
+              <span style={{
+                marginLeft: 'auto', backgroundColor: '#ef4444', color: 'white',
+                fontSize: '10px', fontWeight: '700', padding: '2px 7px', borderRadius: '10px'
+              }}>{fraudAlerts.length}</span>
+            )}
+          </div>
+
+          <div style={activeTab === 'settings' ? styles.navItemActive : styles.navItem} onClick={() => { setActiveTab('settings'); setSidebarOpen(false); loadDepartments(); }}>
+            <span>🏢</span> Ajouter Département
+          </div>
+
+          <div style={activeTab === 'badges' ? styles.navItemActive : styles.navItem} onClick={() => { setActiveTab('badges'); setSidebarOpen(false); }}>
+            <span>📱</span> Badges QR
           </div>
 
           <div style={styles.divider}>Bac à Sable</div>
@@ -713,8 +814,6 @@ export default function Home() {
               ☰
             </button>
             <div>
-              <h1 style={styles.headerTitle}>SaaS Attendance Suite</h1>
-              <p style={styles.headerSubtitle}>Multi-Tenant Enterprise Solutions</p>
             </div>
           </div>
           <div style={styles.userProfile}>
@@ -745,105 +844,210 @@ export default function Home() {
                   <p>Inscrits dans la base</p>
                 </div>
                 
-                <div style={styles.hudCard}>
-                  <div style={styles.hudHeader}>
-                    <span>Présents Aujourd'hui</span>
-                    <span style={styles.hudIcon}>✅</span>
-                  </div>
-                  <h3 style={{ color: 'var(--accent-green)' }}>
-                    {new Set(pointages.filter(p => p.date === new Date().toISOString().split('T')[0] && p.status === 'present').map(p => p.employee_id)).size}
-                  </h3>
-                  <p>Check-ins validés</p>
-                </div>
+                {(() => {
+                  let present = 0, late = 0, absent = 0;
+                  employees.forEach(emp => {
+                    const empPointages = pointages.filter(p => p.users?.id === emp.id);
+                    const lastStatus = empPointages[0]?.status;
+                    if (lastStatus === 'present') present++;
+                    else if (lastStatus === 'late') late++;
+                    else absent++;
+                  });
+                  return (<>
+                    <div style={styles.hudCard}>
+                      <div style={styles.hudHeader}>
+                        <span>Présents</span>
+                        <span style={styles.hudIcon}>✅</span>
+                      </div>
+                      <h3 style={{ color: 'var(--accent-green)' }}>{present}</h3>
+                      <p>Dernier pointage</p>
+                    </div>
+                    <div style={styles.hudCard}>
+                      <div style={styles.hudHeader}>
+                        <span>Retards</span>
+                        <span style={styles.hudIcon}>⏰</span>
+                      </div>
+                      <h3 style={{ color: 'var(--accent-amber)' }}>{late}</h3>
+                      <p>Dernier pointage</p>
+                    </div>
+                    <div style={styles.hudCard}>
+                      <div style={styles.hudHeader}>
+                        <span>Absents</span>
+                        <span style={styles.hudIcon}>❌</span>
+                      </div>
+                      <h3 style={{ color: 'var(--accent-red)' }}>{absent}</h3>
+                      <p>Dernier pointage</p>
+                    </div>
+                  </>);
+                })()}
+              </div>
 
-                <div style={styles.hudCard}>
-                  <div style={styles.hudHeader}>
-                    <span>En Retard</span>
-                    <span style={styles.hudIcon}>⏰</span>
+              {/* STATS ROW — Activity chart + badges */}
+              <div className="split-responsive-flex">
+                {(() => {
+                  let present = 0, late = 0;
+                  employees.forEach(emp => {
+                    const empPointages = pointages.filter(p => p.users?.id === emp.id);
+                    const lastStatus = empPointages[0]?.status;
+                    if (lastStatus === 'present') present++;
+                    else if (lastStatus === 'late') late++;
+                  });
+                  const tauxPresence = employees.length > 0 ? Math.round((present + late) / employees.length * 100) : 0;
+                  const faceOk = pointages.length > 0 ? Math.round(pointages.filter(p => p.face_verified).length / pointages.length * 100) : 0;
+                  const qrOk = pointages.length > 0 ? Math.round(pointages.filter(p => p.qr_verified).length / pointages.length * 100) : 0;
+                  return (
+                <div style={styles.splitCard}>
+                  <h4>Taux de Présence & Badges</h4>
+                  <div style={{ display: 'flex', gap: '30px', justifyContent: 'center', marginTop: '20px' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Taux de Présence</div>
+                      <div style={{ position: 'relative', width: '130px', height: '130px', margin: '0 auto' }}>
+                        <svg width="130" height="130" viewBox="0 0 120 120">
+                          <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="10" />
+                          <circle cx="60" cy="60" r="50" fill="none" stroke="#10B981" strokeWidth="10"
+                                  strokeDasharray={2 * Math.PI * 50}
+                                  strokeDashoffset={2 * Math.PI * 50 * (1 - 86 / 100)}
+                                  strokeLinecap="round"
+                                  transform="rotate(-90 60 60)" />
+                        </svg>
+                        <div style={styles.radialLabel}>
+                          <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#10B981' }}>86%</div>
+                          <div style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>PRÉSENCE</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Badges</div>
+                      <div style={{ position: 'relative', width: '130px', height: '130px', margin: '0 auto' }}>
+                        <svg width="130" height="130" viewBox="0 0 120 120">
+                          <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="10" />
+                          <circle cx="60" cy="60" r="50" fill="none" stroke="#10B981" strokeWidth="10"
+                                  strokeDasharray={2 * Math.PI * 50}
+                                  strokeDashoffset={2 * Math.PI * 50 * (1 - 100 / 100)}
+                                  strokeLinecap="round"
+                                  transform="rotate(-90 60 60)" />
+                        </svg>
+                        <div style={styles.radialLabel}>
+                          <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#10B981' }}>100%</div>
+                          <div style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>BADGES</div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <h3 style={{ color: 'var(--accent-amber)' }}>
-                    {pointages.filter(p => p.date === new Date().toISOString().split('T')[0] && p.status === 'late').length}
-                  </h3>
-                  <p>Arrivées hors-buffer</p>
-                </div>
+                </div>);
+                })()}
 
-                <div style={styles.hudCard}>
-                  <div style={styles.hudHeader}>
-                    <span>Demandes de Congés</span>
-                    <span style={styles.hudIcon}>📅</span>
-                  </div>
-                  <h3 style={{ color: 'var(--accent-red)' }}>
-                    {absences.filter(a => a.admin_status === 'pending').length}
-                  </h3>
-                  <p>En attente de validation</p>
+                <div style={styles.splitCard}>
+                  <h4>📈 Activité 7 jours</h4>
+                  <ResponsiveContainer width="100%" height={180}>
+                    <LineChart data={(() => {
+                      const days = [];
+                      for (let i = 6; i >= 0; i--) {
+                        const d = new Date();
+                        d.setDate(d.getDate() - i);
+                        const dateStr = d.toISOString().split('T')[0];
+                        const dayLabel = d.toLocaleDateString('fr-FR', { weekday: 'short' });
+                        const count = pointages.filter(p => p.date === dateStr).length;
+                        days.push({ day: dayLabel, count });
+                      }
+                      return days;
+                    })()}>
+                      <CartesianGrid stroke="rgba(255,255,255,0.03)" vertical={false} />
+                      <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#64748B' }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: '#64748B' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <Tooltip contentStyle={{ backgroundColor: '#0F172A', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', color: '#F8FAFC' }} />
+                      <Line type="monotone" dataKey="count" stroke="#06B6D4" strokeWidth={2} dot={{ fill: '#06B6D4', r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
 
-              {/* GRAPHS AND RADIAL GAUGE ROWS */}
-              <div className="split-responsive-flex">
+              {/* TOP COLLABORATEURS + ALERTES */}
+              <div className="split-responsive-flex" style={{ marginTop: '20px' }}>
                 <div style={styles.splitCard}>
-                  <h4>Taux de Présence & Badges</h4>
-                  <div style={{ display: 'flex', gap: '30px', alignItems: 'center', marginTop: '20px' }}>
-                    <div style={{ position: 'relative', width: '130px', height: '130px' }}>
-                      <svg width="130" height="130" viewBox="0 0 120 120">
-                        <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="10" />
-                        <circle cx="60" cy="60" r="50" fill="none" stroke="var(--accent-cyan)" strokeWidth="10" 
-                                strokeDasharray={2 * Math.PI * 50} 
-                                strokeDashoffset={2 * Math.PI * 50 * (1 - (pointages.length > 0 ? 88 : 0) / 100)}
-                                strokeLinecap="round"
-                                transform="rotate(-90 60 60)" />
-                      </svg>
-                      <div style={styles.radialLabel}>
-                        <div style={{ fontSize: '22px', fontWeight: 'bold' }}>{pointages.length > 0 ? '88%' : '0%'}</div>
-                        <div style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>ACTIFS</div>
-                      </div>
-                    </div>
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                      <div>
-                        <div style={styles.progressBarHeader}>
-                          <span>Reconnaissance Faciale double scan</span>
-                          <span>92%</span>
+                  <h4>🏆 Top Collaborateurs</h4>
+                  <div style={{ marginTop: '12px' }}>
+                    {(() => {
+                      const ranked = employees
+                        .map(emp => {
+                          const empPointages = pointages.filter(p => p.users?.id === emp.id);
+                          const presents = empPointages.filter(p => p.status === 'present').length;
+                          const total = empPointages.length;
+                          return { ...emp, ratio: total > 0 ? (presents / total * 100) : 0, total };
+                        })
+                        .filter(e => e.total > 0)
+                        .sort((a, b) => b.ratio - a.ratio)
+                        .slice(0, 5);
+                      if (ranked.length === 0) return <p style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Aucune donnée de pointage.</p>;
+                      return ranked.map((emp, i) => (
+                        <div key={emp.id} style={{
+                          display: 'flex', alignItems: 'center', gap: '12px',
+                          padding: '10px 0', borderBottom: i < ranked.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none'
+                        }}>
+                          <div style={{
+                            width: '26px', height: '26px', borderRadius: '50%',
+                            background: i === 0 ? 'linear-gradient(135deg,#F59E0B,#EC4899)' : i < 3 ? 'linear-gradient(135deg,#06B6D4,#3B82F6)' : 'rgba(255,255,255,0.08)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: '11px', fontWeight: '700', color: 'white'
+                          }}>{i + 1}</div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '13px', fontWeight: '600', color: '#F8FAFC' }}>{emp.prenom} {emp.nom}</div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{emp.total} pointages</div>
+                          </div>
+                          <div style={{
+                            fontSize: '13px', fontWeight: '700',
+                            color: emp.ratio >= 90 ? '#10B981' : emp.ratio >= 70 ? '#F59E0B' : '#EF4444'
+                          }}>{emp.ratio.toFixed(0)}%</div>
                         </div>
-                        <div style={styles.progressBarTrack}><div style={{ ...styles.progressBarFill, width: '92%', backgroundColor: 'var(--accent-cyan)' }} /></div>
-                      </div>
-                      <div>
-                        <div style={styles.progressBarHeader}>
-                          <span>Vérification Cryptographique QR</span>
-                          <span>100%</span>
-                        </div>
-                        <div style={styles.progressBarTrack}><div style={{ ...styles.progressBarFill, width: '100%', backgroundColor: 'var(--accent-green)' }} /></div>
-                      </div>
-                    </div>
+                      ));
+                    })()}
                   </div>
                 </div>
 
                 <div style={styles.splitCard}>
-                  <h4>Ecosystem Activité Terminal logs</h4>
-                  <div style={styles.logsView}>
-                    {deviceLogs.slice(0, 5).map((l, i) => (
-                      <div key={i} style={styles.logRow}>
-                        <span style={styles.logTime}>{new Date(l.created_at).toLocaleTimeString()}</span>
-                        <span style={{
-                          ...styles.logBadge,
-                          color: l.log_type === 'scan_success' ? 'var(--accent-green)' : 'var(--accent-red)'
-                        }}>{l.log_type.toUpperCase()}</span>
-                        <p style={styles.logMsg}>{l.message}</p>
-                      </div>
-                    ))}
-                    {deviceLogs.length === 0 && <p style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>Aucun log enregistré dans les terminaux cloud.</p>}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h4 style={{ margin: 0 }}>⚠️ Dernières Alertes</h4>
+                    <span style={{ fontSize: '11px', color: '#06B6D4', cursor: 'pointer' }} onClick={() => setActiveTab('alertes')}>Voir tout →</span>
+                  </div>
+                  <div style={{ marginTop: '12px' }}>
+                    {fraudAlerts.length === 0 ? (
+                      <p style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>Aucune alerte récente.</p>
+                    ) : (
+                      fraudAlerts.slice(0, 5).map((a, i) => (
+                        <div key={a.id || i} style={{
+                          display: 'flex', alignItems: 'center', gap: '10px',
+                          padding: '10px 0', borderBottom: i < Math.min(fraudAlerts.length, 5) - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none'
+                        }}>
+                          <span style={{ fontSize: '16px' }}>🔔</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '12px', color: '#F8FAFC', fontWeight: '500' }}>
+                              {a.users?.prenom} {a.users?.nom}
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                              {new Date(a.created_at).toLocaleDateString('fr-FR')}
+                            </div>
+                          </div>
+                          <span style={{
+                            padding: '2px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: '700',
+                            backgroundColor: a.severity === 'high' ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)',
+                            color: a.severity === 'high' ? '#EF4444' : '#F59E0B'
+                          }}>{a.severity.toUpperCase()}</span>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* ================= TAB 2: LIVE MONITOR ================= */}
+          {/* ================= TAB 2: POINTAGE ================= */}
           {activeTab === 'live' && (
             <div style={styles.tabContentAnim}>
               <div style={styles.card}>
-                <h3 style={styles.cardTitle}>Real-time Activity Stream</h3>
+                <h3 style={styles.cardTitle}>Collaborateurs • Pointage</h3>
                 <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '20px' }}>
-                  Suivi instantané des scans optiques double-authentification transmis par les passerelles physiques.
+                  Liste des collaborateurs avec leur statut de pointage. Cliquez sur Analyser pour voir les détails complets.
                 </p>
 
                 <div className="table-responsive">
@@ -852,69 +1056,109 @@ export default function Home() {
                       <tr>
                         <th>Avatar</th>
                         <th>Collaborateur</th>
-                        <th>Type</th>
+                        <th>Rôle</th>
                         <th>QR Cryp.</th>
                         <th>Face Similarity</th>
-                        <th>Time-date</th>
-                        <th>Device ID</th>
+                        <th>Dernier Pointage</th>
                         <th>Statut</th>
+                        <th>Analyse</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {pointages.map((p, index) => {
-                        const emp = p.users || {};
-                        const dev = p.devices || {};
-                        const initials = `${emp.prenom?.[0] || '?'}${emp.nom?.[0] || '?'}`.toUpperCase();
-                        return (
-                          <tr key={p.id || index}>
-                            <td>
-                              <div style={styles.avatarInitials}>{initials}</div>
-                            </td>
-                            <td style={{ fontWeight: 'bold' }}>{emp.prenom} {emp.nom}</td>
-                            <td>
-                              <span style={{
-                                ...styles.badge,
-                                backgroundColor: p.type === 'check_in' ? 'var(--accent-cyan-glow)' : 'rgba(255,255,255,0.05)',
-                                color: p.type === 'check_in' ? 'var(--accent-cyan)' : 'var(--text-secondary)'
-                              }}>{p.type.replace('_', ' ').toUpperCase()}</span>
-                            </td>
-                            <td>
-                              <span style={{ color: p.qr_verified ? 'var(--accent-green)' : 'var(--accent-red)' }}>
-                                {p.qr_verified ? '● Sign. Valid' : '○ Invalid'}
-                              </span>
-                            </td>
-                            <td>
-                              <span style={{ fontWeight: '600' }}>
-                                {p.face_verified ? `✅ Match (${p.face_score?.toFixed(3) || '0.35'})` : '❌ Mismatch'}
-                              </span>
-                            </td>
-                            <td>
-                              <div>{p.time}</div>
-                              <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{p.date}</div>
-                            </td>
-                            <td>{dev.name || 'Virtual Terminal'}</td>
-                            <td>
-                              <span style={{
-                                ...styles.badge,
-                                backgroundColor: p.status === 'present' ? 'rgba(16,185,129,0.15)' : p.status === 'late' ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
-                                color: p.status === 'present' ? 'var(--accent-green)' : p.status === 'late' ? 'var(--accent-amber)' : 'var(--accent-red)'
-                              }}>{p.status.toUpperCase()}</span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {pointages.length === 0 && (
-                        <tr>
-                          <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)' }}>
-                            Aucun pointage enregistré aujourd'hui. Connectez le simulator pour injecter des scans.
-                          </td>
-                        </tr>
-                      )}
+                      {(() => {
+                        const uniqueEmps = employees.map(emp => {
+                          const empPointages = pointages.filter(p => p.users?.id === emp.id);
+                          const qrOk = empPointages.filter(p2 => p2.qr_verified).length;
+                          const faceOk = empPointages.filter(p2 => p2.face_verified).length;
+                          return {
+                            ...emp,
+                            pointageCount: empPointages.length,
+                            qrVerified: qrOk,
+                            faceVerified: faceOk,
+                            lastPointage: empPointages[0] || null
+                          };
+                        });
+                        if (uniqueEmps.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)' }}>
+                                Aucun collaborateur trouvé.
+                              </td>
+                            </tr>
+                          );
+                        }
+                        return uniqueEmps.map((emp) => {
+                          const initials = `${emp.prenom?.[0] || '?'}${emp.nom?.[0] || '?'}`.toUpperCase();
+                          const lp = emp.lastPointage || {};
+                          const roleLabel = ({ CompanyAdmin: 'Administrateur', SuperAdmin: 'Admin', Manager: 'Manager', Employee: 'Employé' })[emp.role] || emp.role || 'Employé';
+                          return (
+                            <tr key={emp.id}>
+                              <td>
+                                <div style={styles.avatarInitials}>{initials}</div>
+                              </td>
+                              <td style={{ fontWeight: 'bold' }}>{emp.prenom} {emp.nom}</td>
+                              <td>
+                                <span style={{
+                                  ...styles.badge,
+                                  backgroundColor: emp.role === 'Manager' ? 'rgba(245,158,11,0.12)' : 'rgba(6,182,212,0.12)',
+                                  color: emp.role === 'Manager' ? '#f59e0b' : '#06b6d4'
+                                }}>{roleLabel}</span>
+                              </td>
+                              <td>
+                                <span style={{ color: emp.qrVerified > 0 ? 'var(--accent-green)' : 'var(--accent-red)', fontSize: '12px', fontWeight: '600' }}>
+                                  {emp.qrVerified}/{emp.pointageCount} ✅
+                                </span>
+                              </td>
+                              <td>
+                                <span style={{ fontWeight: '600', fontSize: '12px' }}>
+                                  {emp.faceVerified > 0 ? `✅ ${emp.faceVerified}/${emp.pointageCount}` : '❌ Aucun'}
+                                </span>
+                              </td>
+                              <td>
+                                <div style={{ fontSize: '12px' }}>{lp.time || '-'}</div>
+                                <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{lp.date || '-'}</div>
+                              </td>
+                              <td>
+                                <span style={{
+                                  ...styles.badge,
+                                  backgroundColor: lp.status === 'present' ? 'rgba(16,185,129,0.15)' : lp.status === 'late' ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
+                                  color: lp.status === 'present' ? 'var(--accent-green)' : lp.status === 'late' ? 'var(--accent-amber)' : 'var(--accent-red)'
+                                }}>{lp.status ? lp.status.toUpperCase() : 'N/A'}</span>
+                              </td>
+                              <td>
+                                <button
+                                  onClick={() => { setSelectedEmployee(emp); setShowAnalyseModal(true); }}
+                                  style={{
+                                    backgroundColor: 'rgba(6,182,212,0.1)',
+                                    border: '1px solid rgba(6,182,212,0.2)',
+                                    color: '#06b6d4',
+                                    padding: '4px 10px',
+                                    borderRadius: '6px',
+                                    fontSize: '11px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                >📊 Analyser</button>
+                              </td>
+                            </tr>
+                          );
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>
               </div>
             </div>
+          )}
+
+          {showAnalyseModal && selectedEmployee && (
+            <AnalysePointage
+              employee={selectedEmployee}
+              pointages={pointages.filter(p => (p.users?.id || p.users?.email) === (selectedEmployee.id || selectedEmployee.email))}
+              allPointages={pointages}
+              onClose={() => { setShowAnalyseModal(false); setSelectedEmployee(null); }}
+            />
           )}
 
           {/* ================= TAB 3: EMPLOYEES DIRECTORY ================= */}
@@ -928,9 +1172,10 @@ export default function Home() {
               {/* Modal add employee */}
               {showEmployeeModal && (
                 <div style={styles.modalBackdrop}>
-                  <div style={styles.modalCard}>
+                  <div style={{ ...styles.modalCard, maxHeight: '90vh', overflowY: 'auto' }}>
                     <h4>Ajouter un collaborateur</h4>
                     <form onSubmit={handleAddEmployee} style={styles.form}>
+                      <h5 style={{ fontSize: '12px', fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', margin: '10px 0 8px', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>Informations personnelles</h5>
                       <div style={styles.formRow}>
                         <div style={{ flex: 1 }}>
                           <label style={styles.label}>Prénom</label>
@@ -955,6 +1200,59 @@ export default function Home() {
 
                       <div style={styles.formRow}>
                         <div style={{ flex: 1 }}>
+                          <label style={styles.label}>Genre</label>
+                          <select style={styles.input} value={newEmp.genre} onChange={(e) => setNewEmp({ ...newEmp, genre: e.target.value })}>
+                            <option value="">-- Sélectionner --</option>
+                            <option value="Masculin">Masculin</option>
+                            <option value="Féminin">Féminin</option>
+                          </select>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <label style={styles.label}>Date de naissance</label>
+                          <input type="date" style={styles.input} value={newEmp.date_naissance} onChange={(e) => setNewEmp({ ...newEmp, date_naissance: e.target.value })} />
+                        </div>
+                      </div>
+
+                      <div style={styles.formRow}>
+                        <div style={{ flex: 1 }}>
+                          <label style={styles.label}>État civil</label>
+                          <select style={styles.input} value={newEmp.etat_civil} onChange={(e) => setNewEmp({ ...newEmp, etat_civil: e.target.value })}>
+                            <option value="">-- Sélectionner --</option>
+                            <option value="Célibataire">Célibataire</option>
+                            <option value="Marié(e)">Marié(e)</option>
+                            <option value="Divorcé(e)">Divorcé(e)</option>
+                            <option value="Veuf(ve)">Veuf(ve)</option>
+                          </select>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <label style={styles.label}>Autre téléphone</label>
+                          <input type="text" style={styles.input} value={newEmp.autre_telephone} onChange={(e) => setNewEmp({ ...newEmp, autre_telephone: e.target.value })} />
+                        </div>
+                      </div>
+
+                      <h5 style={{ fontSize: '12px', fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', margin: '10px 0 8px', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>Adresse</h5>
+                      <div style={styles.formRow}>
+                        <div style={{ flex: 1 }}>
+                          <label style={styles.label}>Adresse</label>
+                          <input type="text" style={styles.input} value={newEmp.adresse} onChange={(e) => setNewEmp({ ...newEmp, adresse: e.target.value })} />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <label style={styles.label}>Code postal</label>
+                          <input type="text" style={styles.input} value={newEmp.code_postal} onChange={(e) => setNewEmp({ ...newEmp, code_postal: e.target.value })} />
+                        </div>
+                      </div>
+
+                      <div style={styles.formRow}>
+                        <div style={{ flex: 1 }}>
+                          <label style={styles.label}>Ville</label>
+                          <input type="text" style={styles.input} value={newEmp.ville} onChange={(e) => setNewEmp({ ...newEmp, ville: e.target.value })} />
+                        </div>
+                        <div style={{ flex: 1 }}></div>
+                      </div>
+
+                      <h5 style={{ fontSize: '12px', fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', margin: '10px 0 8px', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>Informations professionnelles</h5>
+                      <div style={styles.formRow}>
+                        <div style={{ flex: 1 }}>
                           <label style={styles.label}>Département</label>
                           <select style={styles.input} value={newEmp.department_id} onChange={(e) => setNewEmp({ ...newEmp, department_id: e.target.value })}>
                             <option value="">Sélectionner...</option>
@@ -974,16 +1272,35 @@ export default function Home() {
                         <div style={{ flex: 1 }}>
                           <label style={styles.label}>Rôle de Sécurité</label>
                           <select style={styles.input} value={newEmp.role} onChange={(e) => setNewEmp({ ...newEmp, role: e.target.value })}>
-                            <option value="Employee">Employee (Standard)</option>
-                            <option value="Manager">Manager (Superviseur)</option>
-                            <option value="CompanyAdmin">Company Admin (RH)</option>
+                            <option value="Employee">Employé</option>
+                            <option value="Manager">Manager</option>
+                            <option value="CompanyAdmin">Administrateur</option>
+                          </select>
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <label style={styles.label}>Type de contrat</label>
+                          <select style={styles.input} value={newEmp.type_contrat} onChange={(e) => setNewEmp({ ...newEmp, type_contrat: e.target.value })}>
+                            <option value="">-- Sélectionner --</option>
+                            <option value="CDI">CDI</option>
+                            <option value="CDD">CDD</option>
+                            <option value="Stage">Stage</option>
+                            <option value="Freelance">Freelance</option>
+                            <option value="Alternance">Alternance</option>
                           </select>
                         </div>
                       </div>
 
+                      <div style={styles.formRow}>
+                        <div style={{ flex: 1 }}>
+                          <label style={styles.label}>Date de recrutement</label>
+                          <input type="date" style={styles.input} value={newEmp.date_recrutement} onChange={(e) => setNewEmp({ ...newEmp, date_recrutement: e.target.value })} />
+                        </div>
+                        <div style={{ flex: 1 }}></div>
+                      </div>
+
                       <div style={styles.modalActions}>
                         <button type="button" style={styles.buttonCancel} onClick={() => setShowEmployeeModal(false)}>Fermer</button>
-                        <button type="submit" style={styles.buttonCyan}>Confirmer</button>
+                        <button type="submit" style={styles.buttonCyan}>Enregistrer</button>
                       </div>
                     </form>
                   </div>
@@ -1025,8 +1342,23 @@ export default function Home() {
                             <td>{e.departments?.name || 'Non Assigné'}</td>
                             <td>{e.branches?.name || 'Non Assigné'}</td>
                             <td>
-                              <button style={styles.actionBtnFace} onClick={() => handleFaceEnrollment(e.id)}>
-                                🔑 Générer Empreinte Face ID
+                              <button style={styles.actionBtnFace} onClick={async () => {
+                                setActiveTab('face-profiles');
+                                setEnrollingEmpId(e.id);
+                                setCapturedPhoto(null);
+                                try {
+                                  const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                                  setFaceStream(stream);
+                                  setFaceCameraActive(true);
+                                  setTimeout(() => {
+                                    const video = document.getElementById('face-video');
+                                    if (video) video.srcObject = stream;
+                                  }, 200);
+                                } catch (err) {
+                                  triggerAlert('danger', 'Caméra non accessible: ' + err.message);
+                                }
+                              }}>
+                                📷 Photo Faciale
                               </button>
                             </td>
                             <td>
@@ -1054,153 +1386,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* ================= TAB 4: ABSENCE REQUESTS ================= */}
-          {activeTab === 'absences' && (
-            <div style={styles.tabContentAnim}>
-              <div style={styles.card}>
-                <h3 style={styles.cardTitle}>Absences & Congés Légaux</h3>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '20px' }}>
-                  Suivi des demandes d'arrêts de travail, congés payés, et absences spéciales soumis depuis les téléphones.
-                </p>
-
-                <div className="table-responsive">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Collaborateur</th>
-                        <th>Type</th>
-                        <th>Période</th>
-                        <th>Motif / Justificatif</th>
-                        <th>Validation Manager</th>
-                        <th>Validation RH</th>
-                        <th>Action Globale</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {absences.map(a => {
-                        const emp = a.users || {};
-                        return (
-                          <tr key={a.id}>
-                            <td style={{ fontWeight: 'bold' }}>{emp.prenom} {emp.nom}</td>
-                            <td>
-                              <span style={styles.badge}>{a.type.toUpperCase()}</span>
-                            </td>
-                            <td>
-                              <div>Du: <strong>{a.date_from}</strong></div>
-                              <div>Au: <strong>{a.date_to}</strong></div>
-                            </td>
-                            <td>
-                              <p style={{ margin: 0, fontSize: '12px', maxWidth: '200px' }}>{a.reason}</p>
-                              {a.attachment_url && <a href={a.attachment_url} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: 'var(--accent-cyan)' }}>📎 Voir Document</a>}
-                            </td>
-                            <td>
-                              <span style={{
-                                ...styles.badge,
-                                backgroundColor: a.manager_status === 'approved' ? 'rgba(16,185,129,0.12)' : a.manager_status === 'rejected' ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.12)',
-                                color: a.manager_status === 'approved' ? 'var(--accent-green)' : a.manager_status === 'rejected' ? 'var(--accent-red)' : 'var(--accent-amber)'
-                              }}>{a.manager_status.toUpperCase()}</span>
-                            </td>
-                            <td>
-                              <span style={{
-                                ...styles.badge,
-                                backgroundColor: a.admin_status === 'approved' ? 'rgba(16,185,129,0.12)' : a.admin_status === 'rejected' ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.12)',
-                                color: a.admin_status === 'approved' ? 'var(--accent-green)' : a.admin_status === 'rejected' ? 'var(--accent-red)' : 'var(--accent-amber)'
-                              }}>{a.admin_status.toUpperCase()}</span>
-                            </td>
-                            <td>
-                              <div style={{ display: 'flex', gap: '5px' }}>
-                                <button style={styles.actionBtnFace} onClick={() => handleAbsenceDecision(a.id, 'admin_status', 'approved', 'Approuvé par Admin RH')}>✅ Accepter</button>
-                                <button style={styles.actionBtnTrash} onClick={() => handleAbsenceDecision(a.id, 'admin_status', 'rejected', 'Refusé pour motif de service')}>❌ Rejeter</button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {absences.length === 0 && (
-                        <tr>
-                          <td colSpan="7" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)' }}>Aucune demande de congé enregistrée.</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ================= TAB 5: RECLAMATIONS ================= */}
-          {activeTab === 'reclamations' && (
-            <div style={styles.tabContentAnim}>
-              <div style={styles.card}>
-                <h3 style={styles.cardTitle}>Boîte de Réception des Tickets Support</h3>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '20px' }}>
-                  Réclamations et requêtes de correction manuelle d'heures soumises en cas d'oubli de pointage.
-                </p>
-
-                <div className="table-responsive">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Collaborateur</th>
-                        <th>Objet / Priorité</th>
-                        <th>Message</th>
-                        <th>Créé le</th>
-                        <th>Statut Ticket</th>
-                        <th>Réponse Administrateur</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reclamations.map(r => {
-                        const emp = r.users || {};
-                        return (
-                          <tr key={r.id}>
-                            <td style={{ fontWeight: 'bold' }}>{emp.prenom} {emp.nom}</td>
-                            <td>
-                              <div style={{ fontWeight: '600' }}>{r.subject}</div>
-                              <span style={{
-                                ...styles.badge,
-                                backgroundColor: r.priority === 'urgent' ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.05)',
-                                color: r.priority === 'urgent' ? 'var(--accent-red)' : 'var(--text-secondary)'
-                              }}>{r.priority.toUpperCase()}</span>
-                            </td>
-                            <td style={{ maxWidth: '280px', fontSize: '12px' }}>{r.message}</td>
-                            <td>{new Date(r.created_at).toLocaleDateString()}</td>
-                            <td>
-                              <span style={{
-                                ...styles.badge,
-                                backgroundColor: r.status === 'resolved' ? 'rgba(16,185,129,0.12)' : 'rgba(245,158,11,0.12)',
-                                color: r.status === 'resolved' ? 'var(--accent-green)' : 'var(--accent-amber)'
-                              }}>{r.status.toUpperCase()}</span>
-                            </td>
-                            <td>
-                              {r.status === 'resolved' ? (
-                                <p style={{ margin: 0, fontSize: '12px', color: 'var(--accent-green)' }}>{r.admin_reply}</p>
-                              ) : (
-                                <div style={{ display: 'flex', gap: '8px' }}>
-                                  <input type="text" id={`reply-${r.id}`} placeholder="Répondre..." style={styles.inputSmall} />
-                                  <button style={styles.buttonCyanSmall} onClick={() => {
-                                    const val = document.getElementById(`reply-${r.id}`).value;
-                                    handleReclamationReply(r.id, val);
-                                  }}>Transmettre</button>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {reclamations.length === 0 && (
-                        <tr>
-                          <td colSpan="6" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)' }}>Aucun ticket de support en attente.</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ================= TAB 6: DEVICES HUB ================= */}
+          {/* ================= TAB 4: DEVICES HUB ================= */}
           {activeTab === 'devices' && (
             <div style={styles.tabContentAnim}>
               <div style={styles.actionRow}>
@@ -1281,58 +1467,192 @@ export default function Home() {
             </div>
           )}
 
-          {/* ================= TAB 7: FACE PROFILES ================= */}
+          {/* ================= TAB 5: FACE PROFILES ================= */}
           {activeTab === 'face-profiles' && (
             <div style={styles.tabContentAnim}>
               <div style={styles.card}>
-                <h3 style={styles.cardTitle}>Algorithme de Biomètrie Faciale (Paramètres)</h3>
-                
-                <div style={{ margin: '30px 0', padding: '20px', backgroundColor: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                    <strong>Seuil de tolérance (Distance Euclidienne)</strong>
-                    <span style={{ color: 'var(--accent-cyan)', fontWeight: 'bold' }}>{faceConfidence}</span>
-                  </div>
-                  <input type="range" min="0.1" max="0.9" step="0.01" style={{ width: '100%' }} value={faceConfidence} onChange={(e) => setFaceConfidence(parseFloat(e.target.value))} />
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)', marginTop: '8px' }}>
-                    <span>0.1 (Strict maximum - Taux de faux rejets élevé)</span>
-                    <span>0.48 (Optimale)</span>
-                    <span>0.9 (Permissif - Risque d'erreur)</span>
-                  </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                  <h3 style={{ ...styles.cardTitle, margin: 0 }}>Enrôlement Facial</h3>
+                  <input style={{ width: '250px', padding: '10px 14px', border: '1px solid var(--border)', borderRadius: '10px', outline: 'none', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)', fontSize: '13px', boxSizing: 'border-box' }} placeholder="Rechercher un employé..." value={faceSearch} onChange={e => setFaceSearch(e.target.value)} />
                 </div>
 
-                <div className="table-responsive">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Collaborateur</th>
-                        <th>Photo d'enregistrement</th>
-                        <th>Encodage Vector coordinates 128-D</th>
-                        <th>Enrôlé le</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {employees.map(e => (
-                        <tr key={e.id}>
-                          <td style={{ fontWeight: 'bold' }}>{e.prenom} {e.nom}</td>
-                          <td>
-                            <img src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${e.id}`} alt="Face" style={{ width: '40px', height: '40px', borderRadius: '50%' }} />
-                          </td>
-                          <td>
-                            <code style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                              [0.018274, -0.198274, 0.082711, 0.312998 ... 128 float values calculated by IA]
-                            </code>
-                          </td>
-                          <td>{new Date(e.created_at).toLocaleDateString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                {faceMessage && (
+                  <div style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '13px', fontWeight: 600, marginBottom: '15px', backgroundColor: faceMessage.includes('Erreur') ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)', border: faceMessage.includes('Erreur') ? '1px solid rgba(239,68,68,0.3)' : '1px solid rgba(16,185,129,0.3)', color: faceMessage.includes('Erreur') ? '#ef4444' : '#16a34a' }}>
+                    {faceMessage}
+                    <button onClick={() => setFaceMessage('')} style={{ background: 'none', border: 'none', float: 'right', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+                  </div>
+                )}
+
+                {/* Caméra modale */}
+                {faceCameraActive && (
+                  <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                    <div style={{ position: 'relative', borderRadius: '16px', overflow: 'hidden', backgroundColor: '#000', maxWidth: '500px', width: '90%' }}>
+                      {capturedPhoto ? (
+                        <img src={capturedPhoto} alt="Captured" style={{ width: '100%', display: 'block' }} />
+                      ) : (
+                        <video id="face-video" autoPlay playsInline style={{ width: '100%', display: 'block', transform: 'scaleX(-1)' }} />
+                      )}
+                      <div style={{ padding: '14px', display: 'flex', gap: '10px', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.7)' }}>
+                        {!capturedPhoto ? (
+                          <>
+                            <button style={{ padding: '10px 24px', border: 'none', borderRadius: '8px', backgroundColor: '#fff', color: '#000', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}
+                              onClick={() => {
+                                const video = document.getElementById('face-video');
+                                if (!video) return;
+                                const canvas = document.createElement('canvas');
+                                canvas.width = video.videoWidth;
+                                canvas.height = video.videoHeight;
+                                canvas.getContext('2d').drawImage(video, 0, 0);
+                                setCapturedPhoto(canvas.toDataURL('image/jpeg'));
+                              }}>
+                              📸 Capturer
+                            </button>
+                            <label style={{ padding: '10px 24px', border: 'none', borderRadius: '8px', backgroundColor: '#3b82f6', color: '#fff', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}>
+                              📁 Upload
+                              <input type="file" accept="image/*" style={{ display: 'none' }}
+                                onChange={e => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  const reader = new FileReader();
+                                  reader.onload = () => setCapturedPhoto(reader.result);
+                                  reader.readAsDataURL(file);
+                                }} />
+                            </label>
+                          </>
+                        ) : (
+                          <>
+                            <button style={{ padding: '10px 24px', border: 'none', borderRadius: '8px', backgroundColor: '#ef4444', color: '#fff', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}
+                              onClick={() => {
+                                if (faceStream) {
+                                  setCapturedPhoto(null);
+                                } else {
+                                  handleCloseCamera();
+                                }
+                              }}>
+                              🔄 Reprendre
+                            </button>
+                            <button style={{ padding: '10px 24px', border: 'none', borderRadius: '8px', backgroundColor: '#16a34a', color: '#fff', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}
+                              onClick={async () => {
+                                if (!enrollingEmpId || !capturedPhoto) return;
+                                setQrLoading(true);
+                                try {
+                                  const res = await fetch('http://localhost:5000/api/face/enroll', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ employee_id: enrollingEmpId, face_image_base64: capturedPhoto })
+                                  });
+                                  const data = await res.json();
+                                  if (data.status === 'success') {
+                                    triggerAlert('success', 'Visage enrôlé avec succès !');
+                                    setFaceProfiles(prev => [...prev.filter(fp => fp.user_id !== enrollingEmpId), { user_id: enrollingEmpId, photo_url: data.image_url }]);
+                                    handleCloseCamera();
+                                  } else {
+                                    triggerAlert('danger', 'Erreur: ' + (data.reason || data.message));
+                                  }
+                                } catch (err) {
+                                  triggerAlert('danger', 'Erreur serveur: ' + err.message);
+                                }
+                                setQrLoading(false);
+                              }}>
+                              💾 Enregistrer
+                            </button>
+                          </>
+                        )}
+                        <button style={{ padding: '10px 24px', border: '1px solid rgba(255,255,255,0.3)', borderRadius: '8px', backgroundColor: 'transparent', color: '#fff', fontWeight: 700, fontSize: '13px', cursor: 'pointer' }}
+                          onClick={handleCloseCamera}>
+                          ✕ Fermer
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                  <button style={styles.buttonCyan} onClick={loadFaceData}>🔄 Rafraîchir</button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {faceEmpList.filter(e => `${e.prenom} ${e.nom} ${e.email}`.toLowerCase().includes(faceSearch.toLowerCase())).map(emp => {
+                    const enrolled = faceProfiles.find(fp => fp.user_id === emp.id);
+                    return (
+                      <div key={emp.id} style={{ backgroundColor: 'var(--bg-app)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', gap: '15px' }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-main)' }}>{emp.prenom} {emp.nom}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{emp.email}</div>
+                          </div>
+                          <div style={{ fontSize: '12px', color: enrolled ? '#16a34a' : 'var(--text-muted)', fontWeight: 600 }}>
+                            {enrolled ? '✓ Visage enrôlé' : '✗ Pas de photo'}
+                          </div>
+                          <button style={enrolled ? { padding: '8px 18px', border: '1px solid var(--border)', borderRadius: '8px', backgroundColor: 'transparent', color: 'var(--text-muted)', fontWeight: 700, fontSize: '12px', cursor: 'pointer', flexShrink: 0 } : { padding: '8px 18px', border: 'none', borderRadius: '8px', backgroundColor: 'var(--primary)', color: '#fff', fontWeight: 700, fontSize: '12px', cursor: 'pointer', flexShrink: 0 }}
+                            disabled={faceLoading}
+                            onClick={async () => {
+                              setEnrollingEmpId(emp.id);
+                              setCapturedPhoto(null);
+                              try {
+                                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                                setFaceStream(stream);
+                                setFaceCameraActive(true);
+                                setTimeout(() => {
+                                  const video = document.getElementById('face-video');
+                                  if (video) video.srcObject = stream;
+                                }, 100);
+                              } catch (err) {
+                                triggerAlert('danger', 'Caméra non accessible: ' + err.message);
+                              }
+                            }}>
+                            {faceLoading ? '...' : enrolled ? '🔄 Mettre à jour' : '📷 Prendre Photo'}
+                          </button>
+                          <label style={{ padding: '8px 14px', border: '1px solid var(--border)', borderRadius: '8px', backgroundColor: 'var(--bg-card)', color: 'var(--text-main)', fontWeight: 700, fontSize: '12px', cursor: 'pointer', flexShrink: 0 }}>
+                            📁 Upload
+                            <input type="file" accept="image/*" style={{ display: 'none' }}
+                              onChange={async e => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                const reader = new FileReader();
+                                reader.onload = () => {
+                                  setCapturedPhoto(reader.result);
+                                  setEnrollingEmpId(emp.id);
+                                  setFaceCameraActive(true);
+                                };
+                                reader.readAsDataURL(file);
+                                e.target.value = '';
+                              }} />
+                          </label>
+                          {enrolled && (
+                            <button style={{ padding: '8px 14px', border: '1px solid #ef4444', borderRadius: '8px', backgroundColor: 'transparent', color: '#ef4444', fontWeight: 700, fontSize: '12px', cursor: 'pointer', flexShrink: 0 }}
+                              onClick={async () => {
+                                if (!confirm(`Supprimer la photo faciale de ${emp.prenom} ${emp.nom} ?`)) return;
+                                setFaceLoading(true);
+                                try {
+                                  const { error } = await supabase.from('face_profiles').delete().eq('user_id', emp.id);
+                                  if (error) throw error;
+                                  triggerAlert('success', 'Photo faciale supprimée');
+                                  setFaceProfiles(prev => prev.filter(fp => fp.user_id !== emp.id));
+                                } catch (err) {
+                                  triggerAlert('danger', 'Erreur: ' + err.message);
+                                }
+                                setFaceLoading(false);
+                              }}>
+                              🗑 Supprimer
+                            </button>
+                          )}
+                        </div>
+                        {enrolled && (
+                          <div style={{ padding: '10px 18px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                            <img src={enrolled.photo_url} alt="Face" style={{ width: '60px', height: '60px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #16a34a' }} />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {faceEmpList.length === 0 && <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>Chargement...</p>}
                 </div>
               </div>
             </div>
           )}
 
-          {/* ================= TAB 8: PAYROLL REPORTS ================= */}
+          {/* ================= TAB 6: PAYROLL REPORTS ================= */}
           {activeTab === 'reports' && (
             <div style={styles.tabContentAnim}>
               <div style={styles.card}>
@@ -1488,9 +1808,44 @@ export default function Home() {
           )}
 
 
-          {/* ================= TAB 9: SETTINGS ================= */}
+          {/* ================= TAB 7: SETTINGS ================= */}
           {activeTab === 'settings' && (
             <div style={styles.tabContentAnim}>
+              <div style={styles.card}>
+                <h3 style={styles.cardTitle}>Ajouter un Département</h3>
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const input = e.target.querySelector('[name="deptName"]');
+                  const name = input.value.trim();
+                  if (!name) return;
+                  const { error } = await supabase.from('departments').insert({ name, company_id: currentCompanyId });
+                  if (error) { triggerAlert('danger', 'Erreur: ' + error.message); }
+                  else {
+                    triggerAlert('success', `Département "${name}" ajouté !`);
+                    input.value = '';
+                    loadDepartments();
+                  }
+                }} style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+                  <input name="deptName" placeholder="Nom du département..." style={{ ...styles.input, flex: 1 }} required />
+                  <button type="submit" style={styles.buttonCyan}>+ Ajouter</button>
+                </form>
+
+                <div style={{ marginTop: '10px' }}>
+                  <h4 style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '10px' }}>Départements enregistrés ({departments.length})</h4>
+                  {departments.length > 0 ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {departments.map(d => (
+                        <span key={d.id} style={{ padding: '6px 14px', backgroundColor: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.2)', borderRadius: '20px', fontSize: '13px', fontWeight: 600, color: 'var(--text-main)' }}>
+                          {d.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Aucun département pour le moment.</p>
+                  )}
+                </div>
+              </div>
+
               <div style={styles.card}>
                 <h3 style={styles.cardTitle}>Configuration des Horaires & Shift Toggles</h3>
                 <p style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: '20px' }}>
@@ -1534,6 +1889,162 @@ export default function Home() {
 
                   <button type="submit" style={styles.buttonCyan}>Enregistrer les règles RH</button>
                 </form>
+              </div>
+            </div>
+          )}
+
+          {/* ================= TAB 8: QR BADGES ================= */}
+          {activeTab === 'badges' && (
+            <div style={styles.tabContentAnim}>
+              <div style={styles.card}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                  <h3 style={{ ...styles.cardTitle, margin: 0 }}>Badges QR</h3>
+                  <input style={{ width: '250px', padding: '10px 14px', border: '1px solid var(--border)', borderRadius: '10px', outline: 'none', backgroundColor: 'var(--bg-app)', color: 'var(--text-main)', fontSize: '13px', boxSizing: 'border-box' }} placeholder="Rechercher un employé..." value={qrSearch} onChange={e => setQrSearch(e.target.value)} />
+                </div>
+
+                {qrMessage && (
+                  <div style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '13px', fontWeight: 600, marginBottom: '15px', backgroundColor: qrMessage.includes('Erreur') ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)', border: qrMessage.includes('Erreur') ? '1px solid rgba(239,68,68,0.3)' : '1px solid rgba(16,185,129,0.3)', color: qrMessage.includes('Erreur') ? '#ef4444' : '#16a34a' }}>
+                    {qrMessage}
+                    <button onClick={() => setQrMessage("")} style={{ background: 'none', border: 'none', float: 'right', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {employees.filter(e => `${e.prenom} ${e.nom} ${e.email}`.toLowerCase().includes(qrSearch.toLowerCase())).map(emp => (
+                    <div key={emp.id} style={{ backgroundColor: 'var(--bg-app)', borderRadius: '12px', border: '1px solid var(--border)', overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', gap: '15px' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-main)' }}>{emp.prenom} {emp.nom}</div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{emp.email}</div>
+                        </div>
+                        <div style={{ fontSize: '12px', color: emp.qr_code ? '#16a34a' : 'var(--text-muted)', fontWeight: 600 }}>
+                          {emp.qr_code ? '✓ QR' : '✗ Pas de QR'}
+                        </div>
+                        <button style={emp.qr_code ? { padding: '8px 18px', border: '1px solid var(--border)', borderRadius: '8px', backgroundColor: 'transparent', color: 'var(--text-muted)', fontWeight: 700, fontSize: '12px', cursor: 'pointer', flexShrink: 0 } : { padding: '8px 18px', border: 'none', borderRadius: '8px', backgroundColor: 'var(--primary)', color: '#fff', fontWeight: 700, fontSize: '12px', cursor: 'pointer', flexShrink: 0 }}
+                          onClick={async () => {
+                            setQrLoading(true);
+                            const qrToken = crypto.randomUUID();
+                            const { error } = await supabase.from('users').update({ qr_code: qrToken }).eq('id', emp.id);
+                            if (error) setQrMessage(`Erreur: ${error.message}`);
+                            else {
+                              setQrMessage(`✓ QR code généré pour ${emp.prenom} ${emp.nom}`);
+                              fetchCompanyCollections(currentCompanyId, userRole, currentUser?.id);
+                            }
+                            setQrLoading(false);
+                          }}
+                          disabled={qrLoading}
+                        >
+                          {qrLoading ? '...' : emp.qr_code ? 'Régénérer' : 'Générer QR'}
+                        </button>
+                        {emp.qr_code && (
+                          <button style={{ padding: '8px 18px', border: '1px solid #ef4444', borderRadius: '8px', backgroundColor: 'transparent', color: '#ef4444', fontWeight: 700, fontSize: '12px', cursor: 'pointer', flexShrink: 0 }}
+                            onClick={async () => {
+                              if (!confirm(`Supprimer le QR code de ${emp.prenom} ${emp.nom} ?`)) return;
+                              const { error } = await supabase.from('users').update({ qr_code: null }).eq('id', emp.id);
+                              if (error) setQrMessage(`Erreur: ${error.message}`);
+                              else {
+                                setQrMessage(`✓ QR code supprimé pour ${emp.prenom} ${emp.nom}`);
+                                fetchCompanyCollections(currentCompanyId, userRole, currentUser?.id);
+                              }
+                            }}
+                          >
+                            🗑 Supprimer QR
+                          </button>
+                        )}
+                      </div>
+                      {emp.qr_code && (
+                        <div style={{ padding: '10px 18px 18px', borderTop: '1px solid var(--border)', backgroundColor: '#fff', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '20px' }}>
+                          <div style={{ textAlign: 'center' }} id={`qr-${emp.id}`}>
+                            <QRCode value={emp.qr_code} size={100} level="M" />
+                            <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '4px' }}>{emp.qr_code.slice(0, 12)}...</div>
+                          </div>
+                          <button style={{ padding: '8px 14px', border: '1px solid var(--border)', borderRadius: '8px', backgroundColor: 'var(--bg-card)', color: 'var(--text-main)', fontWeight: 600, fontSize: '12px', cursor: 'pointer' }}
+                            onClick={() => {
+                              const svg = document.querySelector(`#qr-${emp.id} svg`);
+                              if (!svg) return;
+                              const canvas = document.createElement('canvas');
+                              const ctx = canvas.getContext('2d');
+                              const img = new Image();
+                              const svgData = new XMLSerializer().serializeToString(svg);
+                              img.onload = () => {
+                                canvas.width = img.width * 2;
+                                canvas.height = img.height * 2;
+                                ctx.scale(2, 2);
+                                ctx.fillStyle = '#fff';
+                                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                                ctx.drawImage(img, 0, 0);
+                                const a = document.createElement('a');
+                                a.href = canvas.toDataURL('image/png');
+                                a.download = `QR_${emp.prenom}_${emp.nom}.png`;
+                                a.click();
+                              };
+                              img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+                            }}>
+                            📥 Télécharger
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {employees.length === 0 && <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '30px' }}>Chargement...</p>}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ================= TAB 9: ALERTES ================= */}
+          {activeTab === 'alertes' && (
+            <div style={styles.tabContentAnim}>
+              <div style={styles.card}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+                  <span style={{ fontSize: '24px' }}>🔔</span>
+                  <div>
+                    <h3 style={{ ...styles.cardTitle, margin: 0 }}>Alertes de Pointage</h3>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '13px', margin: '4px 0 0 0' }}>
+                      QR validé mais visage non reconnu — {fraudAlerts.length} alerte{fraudAlerts.length > 1 ? 's' : ''}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="table-responsive">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Employé</th>
+                        <th>Message</th>
+                        <th>Sévérité</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fraudAlerts.length === 0 ? (
+                        <tr>
+                          <td colSpan="4" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)' }}>
+                            Aucune alerte pour le moment.
+                          </td>
+                        </tr>
+                      ) : (
+                        fraudAlerts.map((a, i) => (
+                          <tr key={a.id || i}>
+                            <td style={{ fontSize: '12px' }}>{new Date(a.created_at).toLocaleString('fr-FR')}</td>
+                            <td style={{ fontWeight: 'bold', fontSize: '13px' }}>
+                              {a.users?.prenom} {a.users?.nom}
+                              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 'normal' }}>{a.users?.email}</div>
+                            </td>
+                            <td style={{ fontSize: '13px' }}>{a.message}</td>
+                            <td>
+                              <span style={{
+                                padding: '3px 10px', borderRadius: '8px', fontSize: '11px', fontWeight: '700',
+                                backgroundColor: a.severity === 'high' ? 'rgba(239,68,68,0.15)' : a.severity === 'medium' ? 'rgba(245,158,11,0.15)' : 'rgba(6,182,212,0.12)',
+                                color: a.severity === 'high' ? '#ef4444' : a.severity === 'medium' ? '#f59e0b' : '#06b6d4'
+                              }}>{a.severity.toUpperCase()}</span>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

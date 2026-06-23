@@ -250,6 +250,12 @@ tr:hover td {
   }
 }
 
+@media (max-width: 900px) {
+  .brand-section {
+    display: none !important;
+  }
+}
+
 @media (max-width: 640px) {
   .hud-responsive-grid {
     grid-template-columns: 1fr !important;
@@ -276,7 +282,7 @@ tr:hover td {
 
 .sidebar-responsive {
   width: 280px;
-  background-color: rgba(15, 23, 42, 0.45);
+  background-color: #112A6D;
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-right: 1px solid rgba(255, 255, 255, 0.08);

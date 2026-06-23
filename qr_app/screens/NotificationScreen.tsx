@@ -99,7 +99,13 @@ export default function NotificationScreen({ navigation }: any) {
       if (error || !data || data.length === 0) {
         setNotifications(MOCK_NOTIFICATIONS)
       } else {
-        setNotifications(data as AppNotification[])
+        setNotifications(data.map((n: any) => ({
+          id: n.id,
+          title: n.title,
+          body: n.message || n.body || '',
+          type: n.type || 'info',
+          created_at: n.created_at,
+        })) as AppNotification[])
       }
     } catch {
       setNotifications(MOCK_NOTIFICATIONS)

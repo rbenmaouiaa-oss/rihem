@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabase';
 import { useNavigate } from 'react-router-dom';
 
@@ -15,9 +15,20 @@ export default function Register() {
   const [cin, setCin] = useState('');
   const [birthDate, setBirthDate] = useState('');
   const [loading, setLoading] = useState(false);
+  const [companies, setCompanies] = useState([]);
+  const [selectedCompany, setSelectedCompany] = useState('');
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  useEffect(() => {
+    supabase.from('companies').select('id, name').then(({ data }) => {
+      if (data && data.length > 0) {
+        setCompanies(data);
+        setSelectedCompany(data[0].id);
+      }
+    });
+  }, []);
 
   // 🔐 REGISTER
   const register = async () => {
@@ -52,7 +63,7 @@ export default function Register() {
     const user = data.user;
 
     const { error: dbError } = await supabase
-      .from('employers')
+      .from('users')
       .insert([
         {
           id: user?.id,
@@ -60,16 +71,19 @@ export default function Register() {
           nom,
           prenom,
           phone,
-          poste,
+          position: poste,
           cin,
-          birthdate: birthDate
+          date_naissance: birthDate,
+          role: 'Employer',
+          status: 'active',
+          company_id: selectedCompany || null
         }
       ]);
 
     setLoading(false);
 
     if (dbError) {
-      alert("Compte auth créé mais erreur d'enregistrement dans la table employers: " + dbError.message);
+      alert("Compte auth créé mais erreur d'enregistrement dans la table users: " + dbError.message);
       return;
     }
 
@@ -168,6 +182,20 @@ export default function Register() {
                     onChange={(e) => setBirthDate(e.target.value)}
                   />
                 </div>
+              </div>
+
+              <div style={styles.field}>
+                <label style={styles.label}>Entreprise</label>
+                <select
+                  style={styles.input}
+                  value={selectedCompany}
+                  onChange={(e) => setSelectedCompany(e.target.value)}
+                >
+                  {companies.length === 0 && <option value="">Aucune entreprise</option>}
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
               </div>
 
               <div style={styles.field}>

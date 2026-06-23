@@ -218,7 +218,7 @@ export default function EmployeeDetails({ navigation }: any) {
             <View style={styles.infoTextWrap}>
               <Text style={styles.infoLabel}>Total Pointages</Text>
               <Text style={[styles.infoValue, { color: GREEN, fontWeight: '800' }]}>
-                {summary.totalCheckIns} check-in{summary.totalCheckIns !== 1 ? 's' : ''}
+                {summary.totalCheckIns} pointage{summary.totalCheckIns !== 1 ? 's' : ''}
               </Text>
             </View>
           </View>
