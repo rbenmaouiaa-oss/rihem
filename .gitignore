@@ -15,10 +15,6 @@ venv/
 __pycache__/
 
 # Environment — never commit secrets
-.env
-.env.*
-**/.env
-**/.env.*
 !**/.env.example
 
 # OS
@@ -26,7 +22,6 @@ __pycache__/
 Thumbs.db
 
 # IDE
-.vscode/
 .idea/
 
 # Build outputs
@@ -49,3 +44,7 @@ yarn-error.log*
 *.local
 *.tsbuildinfo
 .metro-health-check*
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+config.bat
